@@ -5,7 +5,7 @@ Deterministic city simulation in Rust. Architecture and roadmap (German):
 
 | Crate | Contents |
 | --- | --- |
-| `core` | Event queue, lazy needs, economy (businesses, market), world state, hash-based randomness, state hash |
+| `core` | Event queue, lazy needs, utility decisions with an integer formula language, economy (businesses, market), world state, hash-based randomness, state hash |
 | `content` | Game content as TOML (`content/data/`), JSON schema (`content/schema/`) |
 | `sim` | Headless simulator (CLI) |
 
@@ -21,15 +21,30 @@ cargo run --release -p timeloop-sim -- --agents 1 --days 2 --log
 ```
 
 Add `--stats FILE` to write one CSV row per day (money, prices, wages, cash,
-staff, stock, employment, hunger, meals):
+staff, stock, employment, hunger, meals, work hours, money Gini):
 
 ```bash
 cargo run --release -p timeloop-sim -- --days 3650 --stats stats.csv --quiet
 ```
 
+Agents decide by utility: every action (`eat`, `sleep`, `work`, `overtime`,
+`wander`) has a `when` and a `score` formula in `[action.*]` of the world file,
+reading needs (hunger, fatigue, safety), money, the clock and character traits
+(`greed`, `work_life`, rolled per `[[population]]`). The highest allowed score
+wins. To see why an agent does what it does:
+
+```bash
+cargo run --release -p timeloop-sim -- explain 7 3:08:00
+```
+
+With `--world FILE --watch` the rules are reloaded whenever the file changes,
+so behaviour can be tuned while a long run is going.
+
 The default world is a bread town: field -> mill -> bakery, 50 agents. Money is
 a closed loop (never created or destroyed); prices and wages move in fixed daily
-steps. `sim/tests/bread_town.rs` checks that ten years stay fed and balanced.
+steps. `sim/tests/bread_town.rs` checks that ten years stay fed and balanced;
+`sim/tests/traits.rs` checks that diligent and easygoing populations work
+different hours and end up with different wealth.
 
 `content/data/world.toml` points at its schema, so editors with TOML schema
 support (Taplo / Even Better TOML) autocomplete and validate it. After changing

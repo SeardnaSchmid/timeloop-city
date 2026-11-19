@@ -53,17 +53,29 @@ wage_step = 1
 wage_min = 5
 reserve_days = 3
 
+[traits]
+# Character traits, 0-1000. Formulas read them as trait.<name>.
+# greed: money matters more than free time. work_life: free time and rest matter more.
+names = ["greed", "work_life"]
+
+[[population]]
+name = "townsfolk"
+weight = 1
+traits = { greed = [0, 1000], work_life = [0, 1000] }
+
 [needs.hunger]
 per_hour = 40
-eat_at = 300
 # Interrupts the current action to go eat.
 critical = 800
 
 [needs.fatigue]
 per_hour = 40
-# Sleep at any hour from here on; at night agents already sleep from 200.
-sleep_at = 700
 recovery_per_hour = 80
+
+# Safety: 1000 without savings, 0 once savings pay for reserve_days of meals.
+[needs.safety]
+reserve_days = 5
+meals_per_day = 3
 
 [meal]
 relief = 300
@@ -72,7 +84,30 @@ minutes = 30
 [work]
 start_hour = 8
 end_hour = 18
+overtime_end_hour = 21
+block_minutes = 120
 
 [wander]
 min_minutes = 30
 max_minutes = 120
+
+# Decision rules. On every wake-up each allowed action is scored and the
+# highest wins. Weights follow the needs pyramid: hunger (x4) and sleep (x3)
+# are level 1 and beat safety (level 2, x1/2) and the traits.
+
+[action.eat]
+when = "need.hunger >= 300"
+score = "4 * need.hunger"
+
+[action.sleep]
+when = "need.fatigue >= 700 || (night && need.fatigue >= 200)"
+score = "3 * need.fatigue"
+
+[action.work]
+score = "400 + need.safety / 2 + trait.greed / 4 - need.fatigue * trait.work_life / 1000"
+
+[action.overtime]
+score = "need.safety / 2 + trait.greed / 2 - need.fatigue * trait.work_life / 1000"
+
+[action.wander]
+score = "300 + trait.work_life / 4"

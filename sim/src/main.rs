@@ -5,29 +5,50 @@
 
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
+use std::time::SystemTime;
 use std::{path::PathBuf, process::ExitCode};
 
-use timeloop_core::{StateHash, Stats, World, MINUTES_PER_DAY};
+use timeloop_core::{
+    Allowed, Explanation, Minute, StateHash, Stats, World, WorldConfig, MINUTES_PER_DAY,
+};
 
 const USAGE: &str = "\
-Usage: sim [--seed N] [--days N] [--agents N] [--world FILE] [--stats FILE] [--log] [--quiet]
+Usage: sim [OPTIONS]
+       sim explain AGENT TIME [OPTIONS]
 
   --seed N       world seed (default 1)
   --days N       number of game days (default 1)
   --agents N     override the number of agents from the world file
   --world FILE   custom world.toml instead of the bundled one
+  --watch        reload the decision rules from --world when the file changes
   --stats FILE   write one CSV row of economy statistics per day
   --log          print every event before each day's hash
-  --quiet        print only the final hash";
+  --quiet        print only the final hash
+
+explain runs to TIME (minutes, or DAY:HH:MM such as 3:08:00) and shows how
+AGENT scores every action at that moment.";
 
 struct Args {
     seed: u64,
     days: u64,
     agents: Option<u32>,
     world: Option<PathBuf>,
+    watch: bool,
     stats: Option<PathBuf>,
     log: bool,
     quiet: bool,
+    explain: Option<(u32, Minute)>,
+}
+
+fn parse_time(s: &str) -> Result<Minute, String> {
+    let bad = || format!("bad time \"{s}\": use minutes or DAY:HH:MM");
+    let parts: Vec<&str> = s.split(':').collect();
+    let n = |p: &str| p.parse::<Minute>().map_err(|_| bad());
+    match parts[..] {
+        [m] => n(m),
+        [d, h, m] if n(h)? < 24 && n(m)? < 60 => Ok(n(d)? * MINUTES_PER_DAY + n(h)? * 60 + n(m)?),
+        _ => Err(bad()),
+    }
 }
 
 fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -36,10 +57,19 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
         days: 1,
         agents: None,
         world: None,
+        watch: false,
         stats: None,
         log: false,
         quiet: false,
+        explain: None,
     };
+    let mut it = it.by_ref().peekable();
+    if it.peek().map(String::as_str) == Some("explain") {
+        it.next();
+        let agent = it.next().ok_or("explain needs AGENT and TIME")?;
+        let time = it.next().ok_or("explain needs AGENT and TIME")?;
+        a.explain = Some((parse(&agent, "AGENT")?, parse_time(&time)?));
+    }
     while let Some(flag) = it.next() {
         let mut value = |name: &str| it.next().ok_or(format!("{name} needs a value"));
         match flag.as_str() {
@@ -47,6 +77,7 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
             "--days" => a.days = parse(&value("--days")?, "--days")?,
             "--agents" => a.agents = Some(parse(&value("--agents")?, "--agents")?),
             "--world" => a.world = Some(value("--world")?.into()),
+            "--watch" => a.watch = true,
             "--stats" => a.stats = Some(value("--stats")?.into()),
             "--log" => a.log = true,
             "--quiet" => a.quiet = true,
@@ -56,6 +87,9 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
     }
     if a.log && a.quiet {
         return Err("--log and --quiet exclude each other".into());
+    }
+    if a.watch && a.world.is_none() {
+        return Err("--watch needs --world".into());
     }
     Ok(a)
 }
@@ -93,6 +127,17 @@ fn main() -> ExitCode {
         config.agents = n;
     }
 
+    if let Some((agent, at)) = args.explain {
+        if agent >= config.agents {
+            eprintln!("agent {agent} does not exist ({} agents)", config.agents);
+            return ExitCode::from(2);
+        }
+        let mut world = World::new(args.seed, config);
+        world.run_until(at, &mut |_| {});
+        print!("{}", format_explanation(&world, &world.explain(agent)));
+        return ExitCode::SUCCESS;
+    }
+
     match run(&args, World::new(args.seed, config)) {
         Ok(()) => ExitCode::SUCCESS,
         // A closed pipe (e.g. `| head`) is not an error.
@@ -115,7 +160,26 @@ fn run(args: &Args, mut world: World) -> io::Result<()> {
         None => None,
     };
     let mut meals_before = 0;
+    let mut work_before = 0;
+    let mut watched = args
+        .world
+        .as_ref()
+        .filter(|_| args.watch)
+        .map(|p| (p, modified(p)));
     for day in 1..=args.days {
+        if let Some((path, seen)) = &mut watched {
+            let now = modified(path);
+            if now != *seen {
+                *seen = now;
+                match timeloop_content::load_world(path) {
+                    Ok(c) => {
+                        reload(&mut world, c);
+                        eprintln!("day {day}: reloaded rules from {}", path.display());
+                    }
+                    Err(e) => eprintln!("day {day}: {}: {e} (keeping old rules)", path.display()),
+                }
+            }
+        }
         let mut result = Ok(());
         world.run_until(day * MINUTES_PER_DAY, &mut |entry| {
             if args.log && result.is_ok() {
@@ -125,8 +189,14 @@ fn run(args: &Args, mut world: World) -> io::Result<()> {
         result?;
         if let Some(f) = &mut stats {
             let s = world.stats();
-            writeln!(f, "{}", csv_row(day, &s, s.meals_total - meals_before))?;
+            let work_hours = (s.work_minutes_total - work_before) / 60;
+            writeln!(
+                f,
+                "{}",
+                csv_row(day, &s, s.meals_total - meals_before, work_hours)
+            )?;
             meals_before = s.meals_total;
+            work_before = s.work_minutes_total;
         }
         if !args.quiet {
             writeln!(out, "day {day:>6} {:016x}", world.state_hash())?;
@@ -153,11 +223,21 @@ fn csv_header(world: &World) -> String {
     cols.extend(c.businesses.iter().map(|b| format!("cash_{}", b.name)));
     cols.extend(c.businesses.iter().map(|b| format!("workers_{}", b.name)));
     cols.extend(c.goods.iter().map(|g| format!("stock_{g}")));
-    cols.extend(["employed", "unemployed", "hungry", "meals"].map(String::from));
+    cols.extend(
+        [
+            "employed",
+            "unemployed",
+            "hungry",
+            "meals",
+            "work_hours",
+            "gini_money",
+        ]
+        .map(String::from),
+    );
     cols.join(",")
 }
 
-fn csv_row(day: u64, s: &Stats, meals: u64) -> String {
+fn csv_row(day: u64, s: &Stats, meals: u64, work_hours: u64) -> String {
     let mut cols = vec![
         day.to_string(),
         s.money_agents.to_string(),
@@ -170,5 +250,60 @@ fn csv_row(day: u64, s: &Stats, meals: u64) -> String {
     cols.extend(s.stock.iter().map(u32::to_string));
     cols.extend([s.employed, s.unemployed, s.hungry].map(|v| v.to_string()));
     cols.push(meals.to_string());
+    cols.push(work_hours.to_string());
+    cols.push(s.money_gini_permille.to_string());
     cols.join(",")
+}
+
+fn modified(path: &PathBuf) -> Option<SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+/// Takes the new decision rules; population and economy stay as they are.
+fn reload(world: &mut World, new: WorldConfig) {
+    if new.traits != world.config().traits {
+        eprintln!("trait names changed; restart to apply them (keeping old rules)");
+        return;
+    }
+    world.set_behaviour(new.behaviour);
+}
+
+fn clock(at: Minute) -> String {
+    let m = at % MINUTES_PER_DAY;
+    format!("d{:04} {:02}:{:02}", at / MINUTES_PER_DAY, m / 60, m % 60)
+}
+
+fn format_explanation(world: &World, e: &Explanation) -> String {
+    let mut out = format!("a{} at {}\n", e.agent, clock(e.minute));
+    let action = world.action(e.agent);
+    out += &format!(
+        "  doing     {} until {}\n",
+        action.kind.name(),
+        clock(action.ends)
+    );
+    out += "\nvariables\n";
+    for (name, value) in &e.vars {
+        out += &format!("  {name:<16} {value:>8}\n");
+    }
+    out += "\ncandidates\n";
+    let rules = &world.config().behaviour.actions;
+    for (c, rule) in e.candidates.iter().zip(rules) {
+        let mark = if c.kind == e.winner { "->" } else { "  " };
+        let status = match c.allowed {
+            Allowed::Yes => "allowed".to_string(),
+            Allowed::NotPossible => "not possible now".to_string(),
+            Allowed::RuleSaysNo => format!(
+                "blocked by when = {}",
+                rule.when.as_ref().map_or("", |w| w.source())
+            ),
+        };
+        out += &format!(
+            "{mark} {:<9} {:>7}  {status}\n             score = {}\n",
+            c.kind.name(),
+            c.score,
+            rule.score.source()
+        );
+    }
+    out += &format!("\nwinner: {}\n", e.winner.name());
+    out
 }

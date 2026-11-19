@@ -4,11 +4,14 @@
 //! below (`content/schema/world.schema.json`), so editors can autocomplete and
 //! validate world files. Doc comments here become the schema's descriptions.
 
-use std::{fmt, fs, path::Path};
+use std::{collections::BTreeMap, fmt, fs, path::Path};
 
 use schemars::JsonSchema;
 use serde::Deserialize;
-use timeloop_core::{BusinessConfig, MarketConfig, RecipeInput, WorldConfig, NEED_MAX};
+use timeloop_core::{
+    variable_names, ActionKind, ActionRule, Behaviour, BusinessConfig, Formula, MarketConfig,
+    Population, RecipeInput, WorldConfig, MAX_TRAITS, NEED_MAX,
+};
 
 /// The bundled default world.
 pub const DEFAULT_WORLD: &str = include_str!("../data/world.toml");
@@ -23,10 +26,48 @@ pub struct WorldFile {
     /// Businesses in ID order. Order matters: ties go to the lower ID.
     business: Vec<BusinessSection>,
     market: MarketSection,
+    traits: TraitsSection,
+    /// Agent groups; agents are split over them in ID order, by weight.
+    population: Vec<PopulationSection>,
     needs: NeedsSection,
     meal: MealSection,
     work: WorkSection,
     wander: WanderSection,
+    /// Decision rules per action: eat, sleep, work, overtime, wander. An
+    /// action without a rule never happens; wander is the fallback.
+    action: BTreeMap<String, ActionSection>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct TraitsSection {
+    /// Character traits (0-1000). Formulas read them as `trait.<name>`.
+    names: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct PopulationSection {
+    name: String,
+    /// Share of the agents, relative to the other populations.
+    weight: u32,
+    /// `[min, max]` per trait; agents roll evenly in between. Missing traits are 500.
+    #[serde(default)]
+    traits: BTreeMap<String, [u32; 2]>,
+}
+
+/// Formulas are integer expressions over the decision variables:
+/// `need.hunger`, `need.fatigue`, `need.safety` (0-1000), `money`, `wage`,
+/// `food_price`, `can_eat`, `employed`, `hour`, `night`, `work_time`,
+/// `overtime_time` (0 or 1) and `trait.<name>`. Operators: `+ - * / %`,
+/// comparisons, `&& || !`, `min max clamp if`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ActionSection {
+    /// Extra precondition; the action is allowed when this is > 0.
+    when: Option<String>,
+    /// The allowed action with the highest score is chosen.
+    score: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -100,14 +141,13 @@ struct MarketSection {
 struct NeedsSection {
     hunger: HungerSection,
     fatigue: FatigueSection,
+    safety: SafetySection,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct HungerSection {
     per_hour: u32,
-    /// Agents eat from this hunger on, if they can buy food.
-    eat_at: u32,
     /// Interrupts the current action to go eat.
     critical: u32,
 }
@@ -116,9 +156,16 @@ struct HungerSection {
 #[serde(deny_unknown_fields)]
 struct FatigueSection {
     per_hour: u32,
-    /// Sleep at any hour from here on; at night agents already sleep from 200.
-    sleep_at: u32,
     recovery_per_hour: u32,
+}
+
+/// Safety is 1000 without savings and 0 once savings cover the reserve.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SafetySection {
+    /// Days of meals the reserve covers.
+    reserve_days: i64,
+    meals_per_day: i64,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -134,6 +181,10 @@ struct MealSection {
 struct WorkSection {
     start_hour: u32,
     end_hour: u32,
+    /// Overtime runs from end_hour to here.
+    overtime_end_hour: u32,
+    /// Work happens in blocks of at most this long; agents decide again after each.
+    block_minutes: u64,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -237,18 +288,9 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
     check(m.wage_min >= 0, "market.wage_min must be >= 0")?;
     check(m.reserve_days >= 0, "market.reserve_days must be >= 0")?;
 
-    check(h.eat_at <= NEED_MAX, "needs.hunger.eat_at must be <= 1000")?;
     check(
         h.critical <= NEED_MAX,
         "needs.hunger.critical must be <= 1000",
-    )?;
-    check(
-        h.eat_at <= h.critical,
-        "needs.hunger.eat_at must be <= critical",
-    )?;
-    check(
-        fa.sleep_at <= NEED_MAX,
-        "needs.fatigue.sleep_at must be <= 1000",
     )?;
     check(
         fa.recovery_per_hour > 0,
@@ -256,9 +298,70 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
     )?;
     check(f.meal.minutes > 0, "meal.minutes must be > 0")?;
     check(
-        f.work.start_hour < f.work.end_hour && f.work.end_hour <= 24,
-        "work hours must satisfy start_hour < end_hour <= 24",
+        f.work.start_hour < f.work.end_hour
+            && f.work.end_hour <= f.work.overtime_end_hour
+            && f.work.overtime_end_hour <= 24,
+        "work hours must satisfy start_hour < end_hour <= overtime_end_hour <= 24",
     )?;
+    check(f.work.block_minutes > 0, "work.block_minutes must be > 0")?;
+    let s = &f.needs.safety;
+    check(
+        s.reserve_days >= 0 && s.meals_per_day >= 0,
+        "needs.safety values must be >= 0",
+    )?;
+
+    let traits = f.traits.names.clone();
+    check(
+        traits.len() <= MAX_TRAITS,
+        format!("traits.names: at most {MAX_TRAITS} traits"),
+    )?;
+    for (i, t) in traits.iter().enumerate() {
+        check(
+            !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+            format!("traits.names: \"{t}\" must be letters, digits or _"),
+        )?;
+        check(
+            !traits[..i].contains(t),
+            format!("traits.names: \"{t}\" twice"),
+        )?;
+    }
+    check(
+        !f.population.is_empty(),
+        "at least one [[population]] needed",
+    )?;
+    check(
+        f.population.iter().any(|p| p.weight > 0),
+        "population: at least one weight must be > 0",
+    )?;
+    let mut populations = Vec::new();
+    for p in &f.population {
+        for name in p.traits.keys() {
+            check(
+                traits.contains(name),
+                format!("population \"{}\": unknown trait \"{name}\"", p.name),
+            )?;
+        }
+        let ranges = traits
+            .iter()
+            .map(|t| {
+                let [lo, hi] = p.traits.get(t).copied().unwrap_or([500, 500]);
+                check(
+                    lo <= hi && hi <= NEED_MAX,
+                    format!(
+                        "population \"{}\".traits.{t}: need min <= max <= 1000",
+                        p.name
+                    ),
+                )
+                .map(|()| (lo, hi))
+            })
+            .collect::<Result<_, _>>()?;
+        populations.push(Population {
+            name: p.name.clone(),
+            weight: p.weight,
+            traits: ranges,
+        });
+    }
+    let behaviour = parse_behaviour(&f.action, &traits, s.reserve_days, s.meals_per_day)?;
     check(
         0 < f.wander.min_minutes && f.wander.min_minutes <= f.wander.max_minutes,
         "wander must satisfy 0 < min_minutes <= max_minutes",
@@ -277,18 +380,61 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
             wage_min: m.wage_min,
             reserve_days: m.reserve_days,
         },
+        traits,
+        populations,
+        behaviour,
         hunger_per_hour: h.per_hour,
-        hunger_eat_at: h.eat_at,
         hunger_critical: h.critical,
         fatigue_per_hour: fa.per_hour,
-        fatigue_sleep_at: fa.sleep_at,
         sleep_recovery_per_hour: fa.recovery_per_hour,
         meal_relief: f.meal.relief,
         meal_minutes: f.meal.minutes,
         work_start_hour: f.work.start_hour,
         work_end_hour: f.work.end_hour,
+        overtime_end_hour: f.work.overtime_end_hour,
+        work_block_minutes: f.work.block_minutes,
         wander_min_minutes: f.wander.min_minutes,
         wander_max_minutes: f.wander.max_minutes,
+    })
+}
+
+fn parse_behaviour(
+    actions: &BTreeMap<String, ActionSection>,
+    traits: &[String],
+    reserve_days: i64,
+    meals_per_day: i64,
+) -> Result<Behaviour, ContentError> {
+    let names = variable_names(traits);
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    let compile = |src: &str, at: String| {
+        Formula::compile(src, &names).map_err(|e| ContentError::Invalid(format!("{at}: {e}")))
+    };
+    for name in actions.keys() {
+        check(
+            ActionKind::from_name(name).is_some(),
+            format!("action.{name}: unknown action"),
+        )?;
+    }
+    let mut rules = Vec::new();
+    for kind in ActionKind::CHOOSABLE {
+        let Some(a) = actions.get(kind.name()) else {
+            continue;
+        };
+        let at = |field: &str| format!("action.{}.{field}", kind.name());
+        rules.push(ActionRule {
+            kind,
+            when: a
+                .when
+                .as_deref()
+                .map(|w| compile(w, at("when")))
+                .transpose()?,
+            score: compile(&a.score, at("score"))?,
+        });
+    }
+    Ok(Behaviour {
+        actions: rules,
+        safety_reserve_days: reserve_days,
+        meals_per_day,
     })
 }
 
@@ -321,8 +467,16 @@ mod tests {
     #[test]
     fn inconsistent_values_are_rejected() {
         for (from, to) in [
-            ("critical = 800", "critical = 200"),
+            ("critical = 800", "critical = 2000"),
             ("end_hour = 18", "end_hour = 6"),
+            (
+                "names = [\"greed\", \"work_life\"]",
+                "names = [\"greed\", \"greed\"]",
+            ),
+            ("greed = [", "gred = ["),
+            ("score = \"4 * need.hunger\"", "score = \"4 * need.hungry\""),
+            ("score = \"4 * need.hunger\"", "score = \"4 *\""),
+            ("[action.eat]", "[action.dance]"),
             ("recovery_per_hour = 80", "recovery_per_hour = 0"),
             ("min_minutes = 30", "min_minutes = 0"),
             ("food = \"bread\"", "food = \"cake\""),

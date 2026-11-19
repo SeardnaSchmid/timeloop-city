@@ -4,6 +4,13 @@
   "description": "A world definition: population, goods, businesses and behaviour tuning.\nAll numbers are integers; needs use a 0-1000 scale.",
   "type": "object",
   "properties": {
+    "action": {
+      "description": "Decision rules per action: eat, sleep, work, overtime, wander. An\naction without a rule never happens; wander is the fallback.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/ActionSection"
+      }
+    },
     "business": {
       "description": "Businesses in ID order. Order matters: ties go to the lower ID.",
       "type": "array",
@@ -23,6 +30,16 @@
     "needs": {
       "$ref": "#/$defs/NeedsSection"
     },
+    "population": {
+      "description": "Agent groups; agents are split over them in ID order, by weight.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PopulationSection"
+      }
+    },
+    "traits": {
+      "$ref": "#/$defs/TraitsSection"
+    },
     "wander": {
       "$ref": "#/$defs/WanderSection"
     },
@@ -39,12 +56,36 @@
     "goods",
     "business",
     "market",
+    "traits",
+    "population",
     "needs",
     "meal",
     "work",
-    "wander"
+    "wander",
+    "action"
   ],
   "$defs": {
+    "ActionSection": {
+      "description": "Formulas are integer expressions over the decision variables:\n`need.hunger`, `need.fatigue`, `need.safety` (0-1000), `money`, `wage`,\n`food_price`, `can_eat`, `employed`, `hour`, `night`, `work_time`,\n`overtime_time` (0 or 1) and `trait.<name>`. Operators: `+ - * / %`,\ncomparisons, `&& || !`, `min max clamp if`.",
+      "type": "object",
+      "properties": {
+        "score": {
+          "description": "The allowed action with the highest score is chosen.",
+          "type": "string"
+        },
+        "when": {
+          "description": "Extra precondition; the action is allowed when this is > 0.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "score"
+      ]
+    },
     "BusinessSection": {
       "type": "object",
       "properties": {
@@ -138,18 +179,11 @@
           "type": "integer",
           "format": "uint32",
           "minimum": 0
-        },
-        "sleep_at": {
-          "description": "Sleep at any hour from here on; at night agents already sleep from 200.",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
         }
       },
       "additionalProperties": false,
       "required": [
         "per_hour",
-        "sleep_at",
         "recovery_per_hour"
       ]
     },
@@ -183,12 +217,6 @@
           "format": "uint32",
           "minimum": 0
         },
-        "eat_at": {
-          "description": "Agents eat from this hunger on, if they can buy food.",
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
         "per_hour": {
           "type": "integer",
           "format": "uint32",
@@ -198,7 +226,6 @@
       "additionalProperties": false,
       "required": [
         "per_hour",
-        "eat_at",
         "critical"
       ]
     },
@@ -285,12 +312,86 @@
         },
         "hunger": {
           "$ref": "#/$defs/HungerSection"
+        },
+        "safety": {
+          "$ref": "#/$defs/SafetySection"
         }
       },
       "additionalProperties": false,
       "required": [
         "hunger",
-        "fatigue"
+        "fatigue",
+        "safety"
+      ]
+    },
+    "PopulationSection": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "traits": {
+          "description": "`[min, max]` per trait; agents roll evenly in between. Missing traits are 500.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxItems": 2,
+            "minItems": 2
+          },
+          "default": {}
+        },
+        "weight": {
+          "description": "Share of the agents, relative to the other populations.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "weight"
+      ]
+    },
+    "SafetySection": {
+      "description": "Safety is 1000 without savings and 0 once savings cover the reserve.",
+      "type": "object",
+      "properties": {
+        "meals_per_day": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "reserve_days": {
+          "description": "Days of meals the reserve covers.",
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "reserve_days",
+        "meals_per_day"
+      ]
+    },
+    "TraitsSection": {
+      "type": "object",
+      "properties": {
+        "names": {
+          "description": "Character traits (0-1000). Formulas read them as `trait.<name>`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "names"
       ]
     },
     "WanderSection": {
@@ -316,7 +417,19 @@
     "WorkSection": {
       "type": "object",
       "properties": {
+        "block_minutes": {
+          "description": "Work happens in blocks of at most this long; agents decide again after each.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
         "end_hour": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "overtime_end_hour": {
+          "description": "Overtime runs from end_hour to here.",
           "type": "integer",
           "format": "uint32",
           "minimum": 0
@@ -330,7 +443,9 @@
       "additionalProperties": false,
       "required": [
         "start_hour",
-        "end_hour"
+        "end_hour",
+        "overtime_end_hour",
+        "block_minutes"
       ]
     },
     "WorldSection": {
