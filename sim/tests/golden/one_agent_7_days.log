@@ -12,117 +12,117 @@ d0000 02:52 a0 wander   until d0000 04:07 h= 114 f= 114 m=7850
 d0000 04:07 a0 wander   until d0000 05:01 h= 164 f= 164 m=7850
 d0000 05:01 a0 travel   until d0000 05:03 h= 200 f= 200 m=7850 to (11,9)
 d0000 05:03 a0 sleep    until d0000 07:35 h= 202 f= 202 m=7850
-d0000 07:35 a0 eat      until d0000 08:05 h= 303 f=   0 m=7815
-d0000 08:05 a0 travel   until d0000 08:31 h=  23 f=  20 m=7815 to (3,4)
-d0000 08:31 a0 work     until d0000 10:31 h=  40 f=  37 m=7815
-d0000 10:31 a0 work     until d0000 12:31 h= 120 f= 117 m=7831
-d0000 12:31 a0 work     until d0000 14:31 h= 200 f= 197 m=7847
-d0000 14:31 a0 work     until d0000 16:31 h= 280 f= 277 m=7863
-d0000 16:31 a0 eat      until d0000 17:01 h= 360 f= 357 m=7844
-d0000 17:01 a0 work     until d0000 18:00 h=  80 f= 377 m=7844
-d0000 18:00 a0 wander   until d0000 19:23 h= 119 f= 416 m=7852
-d0000 19:23 a0 wander   until d0000 21:12 h= 174 f= 472 m=7852
-d0000 21:12 a0 wander   until d0000 22:43 h= 247 f= 544 m=7852
-d0000 22:43 a0 travel   until d0000 23:09 h= 308 f= 605 m=7852 to (11,9)
-d0000 23:09 a0 sleep    until d0001 06:56 h= 325 f= 622 m=7852
+d0000 07:35 a0 eat      until d0000 08:05 h= 303 f=   0 m=7816
+d0000 08:05 a0 travel   until d0000 08:31 h=  23 f=  20 m=7816 to (3,4)
+d0000 08:31 a0 work     until d0000 10:31 h=  40 f=  37 m=7816
+d0000 10:31 a0 work     until d0000 12:31 h= 120 f= 117 m=7832
+d0000 12:31 a0 work     until d0000 14:31 h= 200 f= 197 m=7848
+d0000 14:31 a0 work     until d0000 16:31 h= 280 f= 277 m=7864
+d0000 16:31 a0 eat      until d0000 17:01 h= 360 f= 357 m=7846
+d0000 17:01 a0 work     until d0000 18:00 h=  80 f= 377 m=7846
+d0000 18:00 a0 wander   until d0000 19:23 h= 119 f= 416 m=7854
+d0000 19:23 a0 wander   until d0000 21:12 h= 174 f= 472 m=7854
+d0000 21:12 a0 wander   until d0000 22:43 h= 247 f= 544 m=7854
+d0000 22:43 a0 travel   until d0000 23:09 h= 308 f= 605 m=7854 to (11,9)
+d0000 23:09 a0 sleep    until d0001 06:56 h= 325 f= 622 m=7854
 d0001 00:00 -- day starts
 d0001 00:00 a0 moved into h0
-d0001 06:56 a0 eat      until d0001 07:26 h= 636 f=   0 m=7885
-d0001 07:26 a0 eat      until d0001 07:56 h= 356 f=  20 m=7850
-d0001 07:56 a0 wander   until d0001 08:00 h=  76 f=  40 m=7850
-d0001 08:00 a0 travel   until d0001 08:26 h=  78 f=  42 m=7850 to (3,4)
-d0001 08:26 a0 work     until d0001 10:26 h=  96 f=  60 m=7850
-d0001 10:26 a0 work     until d0001 12:26 h= 176 f= 140 m=7866
-d0001 12:26 a0 work     until d0001 14:26 h= 256 f= 220 m=7882
-d0001 14:26 a0 eat      until d0001 14:56 h= 336 f= 300 m=7863
-d0001 14:56 a0 work     until d0001 16:56 h=  56 f= 320 m=7863
-d0001 16:56 a0 work     until d0001 18:00 h= 136 f= 400 m=7879
-d0001 18:00 a0 wander   until d0001 19:41 h= 178 f= 442 m=7887
-d0001 19:41 a0 wander   until d0001 21:33 h= 246 f= 510 m=7887
-d0001 21:33 a0 eat      until d0001 22:03 h= 320 f= 584 m=7852
-d0001 22:03 a0 travel   until d0001 22:09 h=  40 f= 604 m=7852 to (2,6)
-d0001 22:09 a0 sleep    until d0002 05:45 h=  44 f= 608 m=7852
+d0001 06:56 a0 eat      until d0001 07:26 h= 636 f=   0 m=7887
+d0001 07:26 a0 eat      until d0001 07:56 h= 356 f=  20 m=7854
+d0001 07:56 a0 wander   until d0001 08:00 h=  76 f=  40 m=7854
+d0001 08:00 a0 travel   until d0001 08:26 h=  78 f=  42 m=7854 to (3,4)
+d0001 08:26 a0 work     until d0001 10:26 h=  96 f=  60 m=7854
+d0001 10:26 a0 work     until d0001 12:26 h= 176 f= 140 m=7870
+d0001 12:26 a0 work     until d0001 14:26 h= 256 f= 220 m=7886
+d0001 14:26 a0 eat      until d0001 14:56 h= 336 f= 300 m=7869
+d0001 14:56 a0 work     until d0001 16:56 h=  56 f= 320 m=7869
+d0001 16:56 a0 work     until d0001 18:00 h= 136 f= 400 m=7885
+d0001 18:00 a0 wander   until d0001 19:41 h= 178 f= 442 m=7893
+d0001 19:41 a0 wander   until d0001 21:33 h= 246 f= 510 m=7893
+d0001 21:33 a0 eat      until d0001 22:03 h= 320 f= 584 m=7860
+d0001 22:03 a0 travel   until d0001 22:09 h=  40 f= 604 m=7860 to (2,6)
+d0001 22:09 a0 sleep    until d0002 05:45 h=  44 f= 608 m=7860
 d0002 00:00 -- day starts
-d0002 05:45 a0 eat      until d0002 06:15 h= 348 f=   0 m=7953
-d0002 06:15 a0 wander   until d0002 07:59 h=  68 f=  20 m=7953
-d0002 07:59 a0 wander   until d0002 08:00 h= 137 f=  89 m=7953
-d0002 08:00 a0 travel   until d0002 08:06 h= 138 f=  90 m=7953 to (3,4)
-d0002 08:06 a0 work     until d0002 10:06 h= 142 f=  94 m=7953
-d0002 10:06 a0 work     until d0002 12:06 h= 222 f= 174 m=7969
-d0002 12:06 a0 eat      until d0002 12:36 h= 302 f= 254 m=7950
-d0002 12:36 a0 work     until d0002 14:36 h=  22 f= 274 m=7950
-d0002 14:36 a0 work     until d0002 16:36 h= 102 f= 354 m=7966
-d0002 16:36 a0 work     until d0002 18:00 h= 182 f= 434 m=7982
-d0002 18:00 a0 wander   until d0002 20:00 h= 238 f= 490 m=7994
-d0002 20:00 a0 eat      until d0002 20:30 h= 318 f= 570 m=7959
-d0002 20:30 a0 wander   until d0002 21:42 h=  38 f= 590 m=7959
-d0002 21:42 a0 wander   until d0002 23:12 h=  86 f= 638 m=7959
-d0002 23:12 a0 travel   until d0002 23:18 h= 146 f= 698 m=7959 to (2,6)
-d0002 23:18 a0 sleep    until d0003 08:05 h= 150 f= 702 m=7959
+d0002 05:45 a0 eat      until d0002 06:15 h= 348 f=   0 m=7957
+d0002 06:15 a0 wander   until d0002 07:59 h=  68 f=  20 m=7957
+d0002 07:59 a0 wander   until d0002 08:00 h= 137 f=  89 m=7957
+d0002 08:00 a0 travel   until d0002 08:06 h= 138 f=  90 m=7957 to (3,4)
+d0002 08:06 a0 work     until d0002 10:06 h= 142 f=  94 m=7957
+d0002 10:06 a0 work     until d0002 12:06 h= 222 f= 174 m=7973
+d0002 12:06 a0 eat      until d0002 12:36 h= 302 f= 254 m=7958
+d0002 12:36 a0 work     until d0002 14:36 h=  22 f= 274 m=7958
+d0002 14:36 a0 work     until d0002 16:36 h= 102 f= 354 m=7974
+d0002 16:36 a0 work     until d0002 18:00 h= 182 f= 434 m=7990
+d0002 18:00 a0 wander   until d0002 20:00 h= 238 f= 490 m=8002
+d0002 20:00 a0 eat      until d0002 20:30 h= 318 f= 570 m=7971
+d0002 20:30 a0 wander   until d0002 21:42 h=  38 f= 590 m=7971
+d0002 21:42 a0 wander   until d0002 23:12 h=  86 f= 638 m=7971
+d0002 23:12 a0 travel   until d0002 23:18 h= 146 f= 698 m=7971 to (2,6)
+d0002 23:18 a0 sleep    until d0003 08:05 h= 150 f= 702 m=7971
 d0003 00:00 -- day starts
-d0003 08:05 a0 eat      until d0003 08:35 h= 501 f=   0 m=8026
-d0003 08:35 a0 travel   until d0003 08:41 h= 221 f=  20 m=8026 to (3,4)
-d0003 08:41 a0 work     until d0003 10:41 h= 225 f=  24 m=8026
-d0003 10:41 a0 eat      until d0003 11:11 h= 305 f= 104 m=8007
-d0003 11:11 a0 work     until d0003 13:11 h=  25 f= 124 m=8007
-d0003 13:11 a0 work     until d0003 15:11 h= 105 f= 204 m=8023
-d0003 15:11 a0 work     until d0003 17:11 h= 185 f= 284 m=8039
-d0003 17:11 a0 work     until d0003 18:00 h= 265 f= 364 m=8055
-d0003 18:00 a0 wander   until d0003 19:10 h= 297 f= 396 m=8062
-d0003 19:10 a0 eat      until d0003 19:40 h= 344 f= 443 m=8027
-d0003 19:40 a0 wander   until d0003 21:32 h=  64 f= 463 m=8027
-d0003 21:32 a0 wander   until d0003 22:23 h= 138 f= 538 m=8027
-d0003 22:23 a0 travel   until d0003 22:29 h= 172 f= 572 m=8027 to (2,6)
-d0003 22:29 a0 sleep    until d0004 05:41 h= 176 f= 576 m=8027
+d0003 08:05 a0 eat      until d0003 08:35 h= 501 f=   0 m=8030
+d0003 08:35 a0 travel   until d0003 08:41 h= 221 f=  20 m=8030 to (3,4)
+d0003 08:41 a0 work     until d0003 10:41 h= 225 f=  24 m=8030
+d0003 10:41 a0 eat      until d0003 11:11 h= 305 f= 104 m=8015
+d0003 11:11 a0 work     until d0003 13:11 h=  25 f= 124 m=8015
+d0003 13:11 a0 work     until d0003 15:11 h= 105 f= 204 m=8031
+d0003 15:11 a0 work     until d0003 17:11 h= 185 f= 284 m=8047
+d0003 17:11 a0 work     until d0003 18:00 h= 265 f= 364 m=8063
+d0003 18:00 a0 wander   until d0003 19:10 h= 297 f= 396 m=8070
+d0003 19:10 a0 eat      until d0003 19:40 h= 344 f= 443 m=8039
+d0003 19:40 a0 wander   until d0003 21:32 h=  64 f= 463 m=8039
+d0003 21:32 a0 wander   until d0003 22:23 h= 138 f= 538 m=8039
+d0003 22:23 a0 travel   until d0003 22:29 h= 172 f= 572 m=8039 to (2,6)
+d0003 22:29 a0 sleep    until d0004 05:41 h= 176 f= 576 m=8039
 d0004 00:00 -- day starts
-d0004 05:41 a0 eat      until d0004 06:11 h= 464 f=   0 m=8094
-d0004 06:11 a0 wander   until d0004 07:45 h= 184 f=  20 m=8094
-d0004 07:45 a0 wander   until d0004 08:00 h= 246 f=  82 m=8094
-d0004 08:00 a0 travel   until d0004 08:06 h= 256 f=  92 m=8094 to (3,4)
-d0004 08:06 a0 work     until d0004 10:06 h= 260 f=  96 m=8094
-d0004 10:06 a0 eat      until d0004 10:36 h= 340 f= 176 m=8074
-d0004 10:36 a0 work     until d0004 12:36 h=  60 f= 196 m=8074
-d0004 12:36 a0 work     until d0004 14:36 h= 140 f= 276 m=8089
-d0004 14:36 a0 work     until d0004 16:36 h= 220 f= 356 m=8104
-d0004 16:36 a0 eat      until d0004 17:06 h= 300 f= 436 m=8084
-d0004 17:06 a0 work     until d0004 18:00 h=  20 f= 456 m=8084
-d0004 18:00 a0 wander   until d0004 19:29 h=  56 f= 492 m=8091
-d0004 19:29 a0 wander   until d0004 21:29 h= 115 f= 552 m=8091
-d0004 21:29 a0 wander   until d0004 22:56 h= 195 f= 632 m=8091
-d0004 22:56 a0 travel   until d0004 23:02 h= 253 f= 690 m=8091 to (2,6)
-d0004 23:02 a0 sleep    until d0005 07:43 h= 257 f= 694 m=8091
+d0004 05:41 a0 eat      until d0004 06:11 h= 464 f=   0 m=8098
+d0004 06:11 a0 wander   until d0004 07:45 h= 184 f=  20 m=8098
+d0004 07:45 a0 wander   until d0004 08:00 h= 246 f=  82 m=8098
+d0004 08:00 a0 travel   until d0004 08:06 h= 256 f=  92 m=8098 to (3,4)
+d0004 08:06 a0 work     until d0004 10:06 h= 260 f=  96 m=8098
+d0004 10:06 a0 eat      until d0004 10:36 h= 340 f= 176 m=8082
+d0004 10:36 a0 work     until d0004 12:36 h=  60 f= 196 m=8082
+d0004 12:36 a0 work     until d0004 14:36 h= 140 f= 276 m=8097
+d0004 14:36 a0 work     until d0004 16:36 h= 220 f= 356 m=8112
+d0004 16:36 a0 eat      until d0004 17:06 h= 300 f= 436 m=8096
+d0004 17:06 a0 work     until d0004 18:00 h=  20 f= 456 m=8096
+d0004 18:00 a0 wander   until d0004 19:29 h=  56 f= 492 m=8103
+d0004 19:29 a0 wander   until d0004 21:29 h= 115 f= 552 m=8103
+d0004 21:29 a0 wander   until d0004 22:56 h= 195 f= 632 m=8103
+d0004 22:56 a0 travel   until d0004 23:02 h= 253 f= 690 m=8103 to (2,6)
+d0004 23:02 a0 sleep    until d0005 07:43 h= 257 f= 694 m=8103
 d0005 00:00 -- day starts
-d0005 07:43 a0 eat      until d0005 08:13 h= 604 f=   0 m=8158
-d0005 08:13 a0 eat      until d0005 08:43 h= 324 f=  20 m=8123
-d0005 08:43 a0 travel   until d0005 08:49 h=  44 f=  40 m=8123 to (3,4)
-d0005 08:49 a0 work     until d0005 10:49 h=  48 f=  44 m=8123
-d0005 10:49 a0 work     until d0005 12:49 h= 128 f= 124 m=8131
-d0005 12:49 a0 work     until d0005 14:49 h= 208 f= 204 m=8131
-d0005 14:49 a0 work     until d0005 16:49 h= 288 f= 284 m=8131
-d0005 16:49 a0 eat      until d0005 17:19 h= 368 f= 364 m=8096
-d0005 17:19 a0 work     until d0005 18:00 h=  88 f= 384 m=8096
-d0005 18:00 a0 wander   until d0005 19:23 h= 115 f= 411 m=8096
-d0005 19:23 a0 wander   until d0005 20:37 h= 170 f= 466 m=8096
-d0005 20:37 a0 wander   until d0005 21:08 h= 220 f= 516 m=8096
-d0005 21:08 a0 wander   until d0005 21:39 h= 240 f= 536 m=8096
-d0005 21:39 a0 wander   until d0005 23:39 h= 261 f= 557 m=8096
-d0005 23:39 a0 travel   until d0005 23:45 h= 341 f= 637 m=8096 to (2,6)
-d0005 23:45 a0 sleep    until d0006 07:46 h= 345 f= 641 m=8096
+d0005 07:43 a0 eat      until d0005 08:13 h= 604 f=   0 m=8162
+d0005 08:13 a0 eat      until d0005 08:43 h= 324 f=  20 m=8131
+d0005 08:43 a0 travel   until d0005 08:49 h=  44 f=  40 m=8131 to (3,4)
+d0005 08:49 a0 work     until d0005 10:49 h=  48 f=  44 m=8131
+d0005 10:49 a0 work     until d0005 12:49 h= 128 f= 124 m=8139
+d0005 12:49 a0 work     until d0005 14:49 h= 208 f= 204 m=8139
+d0005 14:49 a0 work     until d0005 16:49 h= 288 f= 284 m=8139
+d0005 16:49 a0 eat      until d0005 17:19 h= 368 f= 364 m=8108
+d0005 17:19 a0 work     until d0005 18:00 h=  88 f= 384 m=8108
+d0005 18:00 a0 wander   until d0005 19:23 h= 115 f= 411 m=8108
+d0005 19:23 a0 wander   until d0005 20:37 h= 170 f= 466 m=8108
+d0005 20:37 a0 wander   until d0005 21:08 h= 220 f= 516 m=8108
+d0005 21:08 a0 wander   until d0005 21:39 h= 240 f= 536 m=8108
+d0005 21:39 a0 wander   until d0005 23:39 h= 261 f= 557 m=8108
+d0005 23:39 a0 travel   until d0005 23:45 h= 341 f= 637 m=8108 to (2,6)
+d0005 23:45 a0 sleep    until d0006 07:46 h= 345 f= 641 m=8108
 d0006 00:00 -- day starts
-d0006 07:46 a0 eat      until d0006 08:16 h= 666 f=   0 m=8163
-d0006 08:16 a0 eat      until d0006 08:46 h= 386 f=  20 m=8128
-d0006 08:46 a0 travel   until d0006 08:52 h= 106 f=  40 m=8128 to (3,4)
-d0006 08:52 a0 work     until d0006 10:52 h= 110 f=  44 m=8128
-d0006 10:52 a0 work     until d0006 12:52 h= 190 f= 124 m=8128
-d0006 12:52 a0 work     until d0006 14:52 h= 270 f= 204 m=8128
-d0006 14:52 a0 eat      until d0006 15:22 h= 350 f= 284 m=8093
-d0006 15:22 a0 work     until d0006 17:22 h=  70 f= 304 m=8093
-d0006 17:22 a0 work     until d0006 18:00 h= 150 f= 384 m=8093
-d0006 18:00 a0 wander   until d0006 19:55 h= 175 f= 409 m=8093
-d0006 19:55 a0 wander   until d0006 21:25 h= 252 f= 486 m=8093
-d0006 21:25 a0 eat      until d0006 21:55 h= 312 f= 546 m=8058
-d0006 21:55 a0 wander   until d0006 22:39 h=  32 f= 566 m=8058
-d0006 22:39 a0 travel   until d0006 22:45 h=  61 f= 595 m=8058 to (2,6)
-d0006 22:45 a0 sleep    until d0007 06:15 h=  65 f= 599 m=8058
+d0006 07:46 a0 eat      until d0006 08:16 h= 666 f=   0 m=8167
+d0006 08:16 a0 eat      until d0006 08:46 h= 386 f=  20 m=8136
+d0006 08:46 a0 travel   until d0006 08:52 h= 106 f=  40 m=8136 to (3,4)
+d0006 08:52 a0 work     until d0006 10:52 h= 110 f=  44 m=8136
+d0006 10:52 a0 work     until d0006 12:52 h= 190 f= 124 m=8136
+d0006 12:52 a0 work     until d0006 14:52 h= 270 f= 204 m=8136
+d0006 14:52 a0 eat      until d0006 15:22 h= 350 f= 284 m=8105
+d0006 15:22 a0 work     until d0006 17:22 h=  70 f= 304 m=8105
+d0006 17:22 a0 work     until d0006 18:00 h= 150 f= 384 m=8105
+d0006 18:00 a0 wander   until d0006 19:55 h= 175 f= 409 m=8105
+d0006 19:55 a0 wander   until d0006 21:25 h= 252 f= 486 m=8105
+d0006 21:25 a0 eat      until d0006 21:55 h= 312 f= 546 m=8074
+d0006 21:55 a0 wander   until d0006 22:39 h=  32 f= 566 m=8074
+d0006 22:39 a0 travel   until d0006 22:45 h=  61 f= 595 m=8074 to (2,6)
+d0006 22:45 a0 sleep    until d0007 06:15 h=  65 f= 599 m=8074
 d0007 00:00 -- day starts
 d0007 00:00 association 0 sets min_price = 45

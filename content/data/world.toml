@@ -53,7 +53,7 @@ output_target = 100
 input_target = 200
 
 [market]
-price_step = 1
+price_change_percent = 5
 price_min = 1
 wage_step = 1
 wage_min = 5
@@ -153,6 +153,17 @@ parent_age = [20, 50]
 pension_percent = 20
 # Share of an estate that goes to the town's welfare; children share the rest.
 inheritance_tax_percent = 50
+
+# Professions (one per kind of business) with levels, as in Ages of Echo:
+# 1 experience per hour worked, 50 for level 1, each level 6% more; every
+# level adds 2% output and 2% wage.
+[career]
+xp_per_hour = 1
+level_xp_base = 50
+level_xp_growth_percent = 6
+output_per_level_permille = 20
+wage_per_level_permille = 20
+max_level = 100
 
 [needs.hunger]
 per_hour = 40

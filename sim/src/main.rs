@@ -347,6 +347,7 @@ fn csv_header(world: &World) -> String {
             "in_education",
             "retired",
             "price_index",
+            "mean_level_tenths",
         ]
         .map(String::from),
     );
@@ -395,6 +396,7 @@ fn csv_row(
     cols.extend([s.deaths_total, s.births_total, s.arrivals_total].map(|v| v.to_string()));
     cols.extend([s.mean_age, s.in_education, s.retired].map(|v| v.to_string()));
     cols.push(s.price_index.to_string());
+    cols.push(s.mean_level_tenths.to_string());
     cols.extend(s.assoc_cash.iter().map(i64::to_string));
     cols.join(",")
 }

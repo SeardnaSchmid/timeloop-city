@@ -25,6 +25,17 @@
         "$ref": "#/$defs/BusinessSection"
       }
     },
+    "career": {
+      "description": "Professions with levels. Without it everyone works alike.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CareerSection"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "founding": {
       "description": "Agents founding firms. Without this section only the businesses\nabove exist.",
       "anyOf": [
@@ -255,6 +266,54 @@
         "price",
         "wage",
         "output_target"
+      ]
+    },
+    "CareerSection": {
+      "description": "Every kind of business is a profession (by the good it makes). Work\ngives experience in it; each level needs `level_xp_growth_percent` more\nthan the one before. Levels raise output and wage per hour. Hiring takes\nthe most experienced job seeker first.",
+      "type": "object",
+      "properties": {
+        "level_xp_base": {
+          "description": "Experience from level 0 to 1.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "level_xp_growth_percent": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_level": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "output_per_level_permille": {
+          "description": "Extra output per level, in thousandths (20 = +2 %).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "wage_per_level_permille": {
+          "description": "Extra wage per level, in thousandths.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "xp_per_hour": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "xp_per_hour",
+        "level_xp_base",
+        "level_xp_growth_percent",
+        "output_per_level_permille",
+        "wage_per_level_permille",
+        "max_level"
       ]
     },
     "ComfortSection": {
@@ -615,12 +674,12 @@
     "MarketSection": {
       "type": "object",
       "properties": {
-        "price_min": {
+        "price_change_percent": {
+          "description": "Largest daily price change in percent. Prices follow demand\nagainst the sales that would bring stock to its target.",
           "type": "integer",
           "format": "int64"
         },
-        "price_step": {
-          "description": "Daily price change when stock is off target.",
+        "price_min": {
           "type": "integer",
           "format": "int64"
         },
@@ -641,7 +700,7 @@
       },
       "additionalProperties": false,
       "required": [
-        "price_step",
+        "price_change_percent",
         "price_min",
         "wage_step",
         "wage_min",

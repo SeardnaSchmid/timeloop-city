@@ -18,9 +18,10 @@ pub const MAX_TRAITS: usize = 16;
 /// (0 outside the founding rule; `market.fee` is what associations charge
 /// for founding); `firm.*` describe the firm the agent
 /// owns (0 without one), except `firm.capital`, the cost of founding one.
+/// `level` is the agent's level in the profession of its job (0 without);
 /// `age` is in years; `in_education` and `retired` are 0 or 1 (always 0
 /// without a life course in the world file).
-pub const BASE_VARS: [&str; 30] = [
+pub const BASE_VARS: [&str; 31] = [
     "need.hunger",
     "need.fatigue",
     "need.safety",
@@ -51,6 +52,7 @@ pub const BASE_VARS: [&str; 30] = [
     "in_education",
     "retired",
     "market.fee",
+    "level",
 ];
 
 pub const MAX_VARS: usize = BASE_VARS.len() + MAX_TRAITS;
@@ -90,7 +92,8 @@ pub(crate) mod var {
     pub const IN_EDUCATION: usize = 27;
     pub const RETIRED: usize = 28;
     pub const MARKET_FEE: usize = 29;
-    pub const TRAITS: usize = 30;
+    pub const LEVEL: usize = 30;
+    pub const TRAITS: usize = 31;
 }
 
 /// All variable names for the given traits, in table order.

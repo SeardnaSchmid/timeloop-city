@@ -48,7 +48,8 @@ pub struct BusinessConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MarketConfig {
-    pub price_step: i64,
+    /// Largest daily price change, in percent.
+    pub price_change_percent: i64,
     pub price_min: i64,
     pub wage_step: i64,
     pub wage_min: i64,
@@ -62,7 +63,8 @@ pub struct Economy {
     config: Vec<BusinessConfig>,
     market: MarketConfig,
     cash: Vec<i64>,
-    price: Vec<i64>,
+    /// Price in thousandths; sales use it rounded to whole money.
+    price_milli: Vec<i64>,
     wage: Vec<i64>,
     /// Flat `business * goods + good`.
     stock: Vec<u32>,
@@ -83,6 +85,8 @@ pub struct Economy {
     short_recent: Vec<u32>,
     /// Money taken in from sales since it was last read (for dues).
     revenue: Vec<i64>,
+    /// Per good: units buyers wanted today but found nobody to sell them.
+    unmet: Vec<u32>,
     /// Per good: lowest and highest price a seller may ask (rules of associations).
     price_bounds: Vec<(i64, i64)>,
 }
@@ -97,7 +101,8 @@ impl Economy {
         Self {
             goods,
             cash: config.iter().map(|b| b.start_cash).collect(),
-            price: config.iter().map(|b| b.start_price).collect(),
+            price_milli: config.iter().map(|b| b.start_price * 1000).collect(),
+            unmet: vec![0; goods],
             wage: config.iter().map(|b| b.start_wage).collect(),
             stock,
             progress_milli: vec![0; n],
@@ -124,7 +129,7 @@ impl Economy {
             None => {
                 self.config.push(config.clone());
                 self.cash.push(0);
-                self.price.push(0);
+                self.price_milli.push(0);
                 self.wage.push(0);
                 self.stock.extend(std::iter::repeat_n(0, self.goods));
                 self.progress_milli.push(0);
@@ -143,7 +148,7 @@ impl Economy {
         self.stock[b * g..(b + 1) * g].fill(0);
         self.stock[b * g + config.output as usize] = config.start_stock;
         self.cash[b] = config.start_cash;
-        self.price[b] = config.start_price;
+        self.price_milli[b] = config.start_price * 1000;
         self.wage[b] = config.start_wage;
         self.progress_milli[b] = 0;
         self.sold_today[b] = 0;
@@ -230,7 +235,7 @@ impl Economy {
     }
 
     pub fn price(&self, b: BusinessId) -> i64 {
-        self.price[b as usize]
+        (self.price_milli[b as usize] + 500) / 1000
     }
 
     pub fn wage(&self, b: BusinessId) -> i64 {
@@ -376,6 +381,7 @@ impl Economy {
                 .saturating_sub(self.stock(buyer, input.good));
             while want > 0 {
                 let Some(seller) = self.cheapest_seller(input.good) else {
+                    self.note_unmet(input.good, want);
                     break;
                 };
                 let price = self.price(seller);
@@ -396,41 +402,69 @@ impl Economy {
         }
     }
 
-    /// Fixed-step price adjustment, once a day.
+    /// A buyer wanted `units` of `good` but nobody had it in stock.
+    pub fn note_unmet(&mut self, good: GoodId, units: u32) {
+        self.unmet[good as usize] = self.unmet[good as usize].saturating_add(units);
+    }
+
+    /// Clearing price, once a day: the price moves by the ratio of demand
+    /// plus target stock to what was on offer (sold plus stock left), at
+    /// most `price_change_percent` a day. It holds when stock stays at target
+    /// and nobody goes without.
     ///
-    /// Price rises only when goods actually sold and stock ran low (excess
-    /// demand); it falls on a glut or when nothing sold at all. Empty shelves
-    /// with no buyers leave it unchanged. It never drops below unit cost,
-    /// unless the business is broke.
-    /// A good counts as short today when one of its sellers raised its price.
+    /// Demand is what sold plus this seller's share of what buyers wanted
+    /// and found nowhere. Nothing sold and nothing wanted with stock on the
+    /// shelf: the price falls by the most allowed. It never drops below
+    /// unit cost, unless the business is broke.
+    /// A good counts as short today when a seller raised its price or a
+    /// buyer found none.
     pub fn adjust_prices(&mut self) {
         let m = self.market.clone();
-        let mut short = vec![false; self.goods];
+        let unmet = std::mem::replace(&mut self.unmet, vec![0; self.goods]);
+        let mut short: Vec<bool> = unmet.iter().map(|&u| u > 0).collect();
+        let mut sellers = vec![0u64; self.goods];
+        for b in 0..self.len() {
+            if self.open[b as usize] {
+                sellers[self.config(b).output as usize] += 1;
+            }
+        }
+        let step = m.price_change_percent.clamp(1, 100) * 10;
         for b in 0..self.len() {
             let i = b as usize;
-            let sold = std::mem::take(&mut self.sold_today[i]);
+            let sold = std::mem::take(&mut self.sold_today[i]) as i64;
             if !self.open[i] {
                 continue;
             }
             let c = &self.config[i];
-            let stock = self.stock(b, c.output);
-            if stock > 2 * c.output_target || (sold == 0 && stock > 0) {
-                self.price[i] -= m.price_step;
-            } else if stock < c.output_target && sold > 0 {
-                self.price[i] += m.price_step;
-                short[c.output as usize] = true;
+            let g = c.output as usize;
+            let stock = self.stock(b, c.output) as i64;
+            let demand = sold + (unmet[g] as u64 / sellers[g].max(1)) as i64;
+            let target = c.output_target as i64;
+            // Demand plus target stock against what was on offer: 1 when
+            // stock holds at target and nobody went without.
+            let ratio = if demand == 0 && stock > 0 {
+                1000 - step
+            } else if demand == 0 {
+                1000
+            } else {
+                ((demand + target) * 1000 / (sold + stock).max(1)).clamp(1000 - step, 1000 + step)
+            };
+            if ratio > 1000 {
+                short[g] = true;
             }
+            let mut p = self.price_milli[i] * ratio / 1000;
             // A broke business sells below cost to raise cash.
             let floor = if self.broke_days[i] > 0 {
                 0
             } else {
                 self.unit_cost(b)
             };
-            self.price[i] = self.price[i].max(m.price_min).max(floor);
+            p = p.max(m.price_min * 1000).max(floor * 1000);
             // Rules of associations come last: a minimum price holds even
             // below cost, a maximum even when it means selling at a loss.
-            let (lo, hi) = self.price_bounds[c.output as usize];
-            self.price[i] = self.price[i].max(lo).min(hi);
+            let (lo, hi) = self.price_bounds[g];
+            p = p.max(lo.saturating_mul(1000)).min(hi.saturating_mul(1000));
+            self.price_milli[i] = p;
         }
         for (r, s) in self.short_recent.iter_mut().zip(short) {
             *r = (7 * *r + 1000 * s as u32) / 8;
@@ -477,7 +511,8 @@ impl Economy {
 
     pub fn hash_into(&self, h: &mut StateHasher) {
         h.write_i64_slice(&self.cash);
-        h.write_i64_slice(&self.price);
+        h.write_i64_slice(&self.price_milli);
+        h.write_u32_slice(&self.unmet);
         h.write_i64_slice(&self.wage);
         h.write_u32_slice(&self.stock);
         h.write_u32_slice(&self.workers);
@@ -534,7 +569,7 @@ pub(crate) mod tests {
 
     pub(crate) fn market() -> MarketConfig {
         MarketConfig {
-            price_step: 1,
+            price_change_percent: 10,
             price_min: 1,
             wage_step: 1,
             wage_min: 1,
@@ -585,23 +620,52 @@ pub(crate) mod tests {
 
     #[test]
     fn scarce_output_raises_price_glut_lowers_it() {
-        let mut e = Economy::new(3, chain(), market());
+        let mut c = chain();
+        c[2].start_price = 100;
+        let mut e = Economy::new(3, c, market());
         // Empty shelves, no buyers: unchanged.
         e.adjust_prices();
-        assert_eq!(e.price(2), 2);
-        // Sold out with buyers: up.
+        assert_eq!(e.price_milli[2], 100_000);
+        // Sold out with buyers: up by the most allowed (10 %).
         *e.stock_mut(2, BREAD) = 1;
         e.sell_one(2);
         e.adjust_prices();
-        assert_eq!(e.price(2), 3);
-        // Nothing sold despite stock: down.
+        assert_eq!(e.price_milli[2], 110_000);
+        // Buyers who found nothing push too.
+        e.note_unmet(BREAD, 5);
+        e.adjust_prices();
+        assert_eq!(e.price_milli[2], 121_000);
+        // Nothing sold despite stock: down by the most allowed.
         *e.stock_mut(2, BREAD) = 10;
         e.adjust_prices();
-        assert_eq!(e.price(2), 2);
-        *e.stock_mut(2, BREAD) = 500;
+        assert_eq!(e.price_milli[2], 108_900);
+        *e.stock_mut(2, BREAD) = 50;
+        e.sell_one(2);
+        e.sell_one(2);
+        e.sell_one(2);
+        e.sell_one(2);
+        e.sell_one(2);
+        e.sell_one(2);
+        e.sell_one(2);
+        e.sell_one(2);
+        e.sell_one(2);
+        e.sell_one(2);
+        // Sold 10, 40 left, target 60: (10 + 60) / (10 + 40) = 1.4 -> +10 %.
         e.adjust_prices();
+        assert_eq!(e.price_milli[2], 119_790);
+        *e.stock_mut(2, BREAD) = 60;
+        for _ in 0..10 {
+            e.sell_one(2);
+        }
         e.adjust_prices();
-        assert_eq!(e.price(2), 1);
+        // 70 on the shelf, 10 sold, 60 left = target: (10 + 60) / 70 holds.
+        *e.stock_mut(2, BREAD) = 70;
+        for _ in 0..10 {
+            e.sell_one(2);
+        }
+        let before = e.price_milli[2];
+        e.adjust_prices();
+        assert_eq!(e.price_milli[2], before);
     }
 
     #[test]

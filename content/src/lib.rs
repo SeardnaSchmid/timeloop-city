@@ -10,9 +10,9 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use timeloop_core::{
     variable_names, ActionKind, ActionRule, AssocKind, AssociationConfig, Behaviour,
-    BusinessConfig, Formula, FoundingRule, GoodId, HouseConfig, HousingConfig, HousingRule,
-    LifeConfig, MapConfig, MarketConfig, Population, Pos, RecipeInput, Rule, RuleKind, WorldConfig,
-    ASSOC_VARS, MAX_TRAITS, NEED_MAX,
+    BusinessConfig, CareerConfig, Formula, FoundingRule, GoodId, HouseConfig, HousingConfig,
+    HousingRule, LifeConfig, MapConfig, MarketConfig, Population, Pos, RecipeInput, Rule, RuleKind,
+    WorldConfig, ASSOC_VARS, MAX_TRAITS, NEED_MAX,
 };
 
 /// The bundled default world.
@@ -44,6 +44,8 @@ pub struct WorldFile {
     /// Guilds and the town council, in ID order.
     #[serde(default)]
     association: Vec<AssociationSection>,
+    /// Professions with levels. Without it everyone works alike.
+    career: Option<CareerSection>,
     needs: NeedsSection,
     meal: MealSection,
     work: WorkSection,
@@ -169,6 +171,24 @@ struct AssociationSection {
     rules: BTreeMap<String, String>,
 }
 
+/// Every kind of business is a profession (by the good it makes). Work
+/// gives experience in it; each level needs `level_xp_growth_percent` more
+/// than the one before. Levels raise output and wage per hour. Hiring takes
+/// the most experienced job seeker first.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CareerSection {
+    xp_per_hour: u32,
+    /// Experience from level 0 to 1.
+    level_xp_base: u32,
+    level_xp_growth_percent: u32,
+    /// Extra output per level, in thousandths (20 = +2 %).
+    output_per_level_permille: u32,
+    /// Extra wage per level, in thousandths.
+    wage_per_level_permille: u32,
+    max_level: u32,
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct TraitsSection {
@@ -260,8 +280,9 @@ struct InputSection {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct MarketSection {
-    /// Daily price change when stock is off target.
-    price_step: i64,
+    /// Largest daily price change in percent. Prices follow demand
+    /// against the sales that would bring stock to its target.
+    price_change_percent: i64,
     price_min: i64,
     /// Daily wage change when cash is off target.
     wage_step: i64,
@@ -661,7 +682,7 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
         houses,
         housing,
         market: MarketConfig {
-            price_step: m.price_step,
+            price_change_percent: m.price_change_percent,
             price_min: m.price_min,
             wage_step: m.wage_step,
             wage_min: m.wage_min,
@@ -672,6 +693,14 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
         behaviour,
         life,
         associations,
+        career: f.career.as_ref().map(|c| CareerConfig {
+            xp_per_hour: c.xp_per_hour,
+            level_xp_base: c.level_xp_base,
+            level_xp_growth_percent: c.level_xp_growth_percent,
+            output_per_level_permille: c.output_per_level_permille,
+            wage_per_level_permille: c.wage_per_level_permille,
+            max_level: c.max_level,
+        }),
         hunger_per_hour: h.per_hour,
         hunger_critical: h.critical,
         fatigue_per_hour: fa.per_hour,

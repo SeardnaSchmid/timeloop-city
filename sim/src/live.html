@@ -252,6 +252,7 @@ function draw() {
     ['mean age', w.meanAge], ['in education / retired', `${w.inEducation} / ${w.retired}`],
     ['deaths / born / moved in', `${w.deaths} / ${w.births} / ${w.newcomers}`],
     ['price index (meal incl. tax)', w.priceIndex],
+    ['mean level of workers', w.meanLevel],
     ...w.associations.map(a => [`${a.name} (${a.members}) · cash ${a.cash}`,
       a.rules.map(([r, v]) => `${r} ${v}`).join(', ') || '–']),
     ...goods.map(g => [`${g} price (lowest)`, isFinite(cheapest(g)) ? cheapest(g) : '–'])]
@@ -269,6 +270,7 @@ function showInfo() {
     const k = selected.id, stage = ['in education', 'working age', 'retired'][w.stages[k]];
     rows = [['age', `${w.ages[k]} (${stage})`], ['parent', w.parents[k] >= 0 ? 'a' + w.parents[k] : '–'],
       ['generation in this slot', w.generations[k] + 1],
+      ['level in job', w.levels[k] >= 0 ? w.levels[k] : '–'],
       ['doing', L.actions[a.act]], ['hunger', a.hunger], ['money', a.money],
       ['home', a.home >= 0 ? L.houses[a.home].name : 'homeless'], ['job', a.job >= 0 ? w.businesses[a.job].name + (w.businesses[a.job].owner === selected.id ? ' (CEO)' : '') : 'unemployed'],
       ...L.traits.map((t, n) => [t, w.traits[selected.id][n]])];

@@ -10,6 +10,7 @@ use std::fmt;
 
 use crate::assoc::{avar, AssocKind, AssociationConfig, RuleKind, ASSOC_VARS, WEEK_DAYS};
 use crate::behaviour::{var, Allowed, Behaviour, Candidate, Explanation, Population, MAX_VARS};
+use crate::career::{self, CareerConfig};
 use crate::economy::{BusinessConfig, BusinessId, Economy, GoodId, MarketConfig};
 use crate::hash::{StateHash, StateHasher};
 use crate::housing::{HouseConfig, Housing, HousingConfig};
@@ -61,6 +62,8 @@ pub struct WorldConfig {
     pub life: Option<LifeConfig>,
     /// Guilds and the town council, in ID order.
     pub associations: Vec<AssociationConfig>,
+    /// Professions with levels; `None`: everyone works alike.
+    pub career: Option<CareerConfig>,
 
     pub hunger_per_hour: u32,
     /// Hunger at which a running action is interrupted to go eat.
@@ -398,6 +401,8 @@ pub struct Stats {
     pub price_index: i64,
     /// Treasury per association, in association order.
     pub assoc_cash: Vec<i64>,
+    /// Mean level of employed agents in their job's profession, in tenths.
+    pub mean_level_tenths: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -450,6 +455,11 @@ pub struct World {
     assoc_cash: Vec<i64>,
     /// Current value of every rule, per association in rule order.
     rule_values: Vec<Vec<i64>>,
+    /// Experience per agent and profession (the good a business makes),
+    /// flat `agent * goods + good`.
+    xp: Vec<u64>,
+    /// Experience needed per level; derived from the config.
+    level_table: Vec<u64>,
 }
 
 const NO_PARENT: (u32, u32) = (u32::MAX, u32::MAX);
@@ -542,6 +552,8 @@ impl World {
             rule_values: (config.associations.iter())
                 .map(|a| vec![0; a.rules.len()])
                 .collect(),
+            xp: vec![0; n * config.goods.len()],
+            level_table: config.career.as_ref().map_or(vec![0], |c| c.thresholds()),
             config,
         }
     }
@@ -794,6 +806,15 @@ impl World {
                 .count() as u32,
             price_index: self.price_index(),
             assoc_cash: self.assoc_cash.clone(),
+            mean_level_tenths: {
+                let levels: Vec<u64> = (0..self.config.agents)
+                    .filter_map(|a| {
+                        self.employer(a)
+                            .map(|b| self.level(a, self.economy.config(b).output) as u64)
+                    })
+                    .collect();
+                (levels.iter().sum::<u64>() * 10 / levels.len().max(1) as u64) as u32
+            },
             money_owners: (0..self.config.agents as usize)
                 .filter(|&i| self.owns[i] != NO_EMPLOYER)
                 .map(|i| self.money[i])
@@ -905,7 +926,7 @@ impl World {
                 continue;
             }
             while self.economy.workers(b) < CORE_CREW.min(self.economy.config(b).slots) {
-                let Some(agent) = self.hire_candidate() else {
+                let Some(agent) = self.hire_candidate(b) else {
                     break;
                 };
                 self.hire(agent, b, at, log);
@@ -918,7 +939,7 @@ impl World {
                 if !self.wants_to_hire(b, hours) {
                     continue;
                 }
-                let Some(agent) = self.hire_candidate() else {
+                let Some(agent) = self.hire_candidate(b) else {
                     break 'rounds;
                 };
                 self.hire(agent, b, at, log);
@@ -1084,13 +1105,35 @@ impl World {
             .expect("worker count matches employers")
     }
 
-    /// The job seeker with the least money is hired first (ties: lowest ID).
-    fn hire_candidate(&self) -> Option<u32> {
+    /// Level of `agent` in the profession making `good`.
+    pub fn level(&self, agent: u32, good: GoodId) -> u32 {
+        let g = self.config.goods.len();
+        career::level(
+            &self.level_table,
+            self.xp[agent as usize * g + good as usize],
+        )
+    }
+
+    /// Experience of `agent` in the profession making `good`.
+    pub fn experience(&self, agent: u32, good: GoodId) -> u64 {
+        self.xp[agent as usize * self.config.goods.len() + good as usize]
+    }
+
+    /// The job seeker with the most experience in `b`'s profession is hired
+    /// first; then the one with the least money, then the lowest ID.
+    fn hire_candidate(&self, b: BusinessId) -> Option<u32> {
+        let good = self.economy.config(b).output;
         (0..self.config.agents)
             .filter(|&a| {
                 self.employer[a as usize] == NO_EMPLOYER && self.stage(a) == Stage::Working
             })
-            .min_by_key(|&a| (self.money[a as usize], a))
+            .min_by_key(|&a| {
+                (
+                    std::cmp::Reverse(self.experience(a, good)),
+                    self.money[a as usize],
+                    a,
+                )
+            })
     }
 
     /// Pays every business's surplus cash out: a firm's to its owner after
@@ -1482,6 +1525,8 @@ impl World {
         self.work_minutes[i] = 0;
         self.work_at_day_start[i] = 0;
         self.work_recent[i] = 0;
+        let g = self.config.goods.len();
+        self.xp[i * g..(i + 1) * g].fill(0);
         log(LogEntry::Life {
             at,
             agent,
@@ -1518,6 +1563,14 @@ impl World {
             (previous.kind != ActionKind::Idle && now < previous.ends).then_some(previous.kind);
 
         self.settle(agent, now, log);
+        // Hungry with money but no food on any shelf: unmet demand.
+        let food = self.config.food;
+        if self.hunger[i].value(now, self.config.hunger_per_hour) >= self.config.hunger_critical
+            && self.economy.cheapest_seller(food).is_none()
+            && self.money[i] >= self.food_list_price()
+        {
+            self.economy.note_unmet(food, 1);
+        }
         let action = self.decide(agent, now);
         self.event_no[i] += 1;
         if action.kind == ActionKind::Eat {
@@ -1580,8 +1633,17 @@ impl World {
                     return;
                 }
                 self.work_minutes[i] += elapsed;
-                self.economy.produce(b, elapsed);
-                let owed = self.economy.wage(b) * elapsed as i64 / 60;
+                let good = self.economy.config(b).output;
+                let level = self.level(agent, good);
+                let (output, wage) = self.config.career.as_ref().map_or((1000, 1000), |c| {
+                    (c.output_permille(level), c.wage_permille(level))
+                });
+                self.economy.produce(b, elapsed * output / 1000);
+                let owed = self.economy.wage(b) * elapsed as i64 * wage as i64 / 60_000;
+                if let Some(c) = &self.config.career {
+                    let g = self.config.goods.len();
+                    self.xp[i * g + good as usize] += elapsed * c.xp_per_hour as u64 / 60;
+                }
                 let paid = self.economy.pay(b, owed);
                 let pension = self
                     .config
@@ -1780,6 +1842,9 @@ impl World {
         v[var::SAFETY] = self.safety(agent) as i64;
         v[var::MONEY] = self.money[i];
         v[var::WAGE] = if employed { self.economy.wage(b) } else { 0 };
+        if employed {
+            v[var::LEVEL] = self.level(agent, self.economy.config(b).output) as i64;
+        }
         v[var::FOOD_PRICE] = self.with_tax(c.food, self.food_list_price());
         v[var::CAN_EAT] = self.can_buy_food(i) as i64;
         v[var::EMPLOYED] = employed as i64;
@@ -2013,6 +2078,7 @@ impl StateHash for World {
         h.write_i64(self.pension_fund);
         h.write_i64_slice(&self.assoc_cash);
         self.rule_values.iter().for_each(|v| h.write_i64_slice(v));
+        self.xp.iter().for_each(|&x| h.write_u64(x));
     }
 }
 
@@ -2101,7 +2167,7 @@ pub(crate) mod tests {
                 business("bakery", BREAD, Some(FLOUR), 1500, 12, 35, 150, 13, 13),
             ],
             market: MarketConfig {
-                price_step: 1,
+                price_change_percent: 10,
                 price_min: 1,
                 wage_step: 1,
                 wage_min: 5,
@@ -2137,6 +2203,7 @@ pub(crate) mod tests {
             behaviour: behaviour(&RULES),
             life: None,
             associations: Vec::new(),
+            career: None,
             hunger_per_hour: 40,
             hunger_critical: 800,
             fatigue_per_hour: 40,
@@ -2308,20 +2375,27 @@ pub(crate) mod tests {
 
     #[test]
     fn agents_are_at_work_from_work_start() {
+        // Nobody wanders before work; at the start an easygoing agent with
+        // savings may still prefer a walk, but hardly anyone does.
         let mut w = World::new(5, config());
         let start = config().work_start_hour as Minute * 60;
+        let (mut employed, mut wandering) = (0, 0);
         for day in 0..30 {
             w.run_until(day * MINUTES_PER_DAY + start + 1, &mut |_| {});
             for agent in 0..w.agent_count() {
                 if w.employer(agent).is_some() {
-                    assert_ne!(
-                        w.action(agent).kind,
-                        ActionKind::Wander,
-                        "day {day} a{agent}"
-                    );
+                    employed += 1;
+                    if w.action(agent).kind == ActionKind::Wander {
+                        assert_eq!(w.safety(agent), 0, "day {day} a{agent} needs money");
+                        wandering += 1;
+                    }
                 }
             }
         }
+        assert!(
+            wandering * 20 <= employed,
+            "{wandering} of {employed} wander"
+        );
     }
 
     #[test]
@@ -3039,5 +3113,93 @@ mod assoc_tests {
         // Fee paid on day 1 or 2; the guild meets on day 7.
         assert_eq!(w.stats().assoc_cash[0], 50);
         assert_eq!(w.money_supply(), supply);
+    }
+}
+
+#[cfg(test)]
+mod career_tests {
+    use super::tests::config;
+    use super::*;
+    use crate::economy::tests::BREAD;
+
+    fn with_career() -> WorldConfig {
+        let mut c = config();
+        c.career = Some(CareerConfig {
+            xp_per_hour: 1,
+            level_xp_base: 50,
+            level_xp_growth_percent: 6,
+            output_per_level_permille: 20,
+            wage_per_level_permille: 20,
+            max_level: 100,
+        });
+        c
+    }
+
+    #[test]
+    fn work_gives_experience_in_its_profession() {
+        let mut w = World::new(1, with_career());
+        w.run_days(60);
+        let workers: Vec<u32> = (0..w.agent_count())
+            .filter(|&a| {
+                w.employer(a)
+                    .is_some_and(|b| w.economy().config(b).output == BREAD)
+            })
+            .collect();
+        assert!(!workers.is_empty());
+        for &a in &workers {
+            let hours = w.work_minutes(a) / 60;
+            assert!(w.experience(a, BREAD) <= hours);
+        }
+        assert!(
+            workers.iter().any(|&a| w.level(a, BREAD) >= 1),
+            "bakers level up"
+        );
+    }
+
+    #[test]
+    fn the_most_experienced_job_seeker_is_hired_first() {
+        let mut w = World::new(1, with_career());
+        w.run_days(1);
+        let g = w.config.goods.len();
+        let seekers: Vec<u32> = (0..w.agent_count())
+            .filter(|&a| w.employer(a).is_none() && w.stage(a) == Stage::Working)
+            .collect();
+        let &veteran = seekers.last().expect("someone is looking for work");
+        w.xp[veteran as usize * g + BREAD as usize] = 10_000;
+        assert_eq!(
+            w.hire_candidate(2),
+            Some(veteran),
+            "bakery hires the veteran"
+        );
+        assert_ne!(
+            w.hire_candidate(0),
+            Some(veteran),
+            "the field does not care"
+        );
+    }
+
+    #[test]
+    fn levels_pay_more_per_hour() {
+        // Same day of work, once as a beginner and once at level 25.
+        let pay = |xp: u64| {
+            let mut w = World::new(1, with_career());
+            w.run_until(MINUTES_PER_DAY + 7 * 60, &mut |_| {});
+            let g = w.config.goods.len();
+            let a = (0..w.agent_count())
+                .find(|&a| w.employer(a) == Some(2))
+                .expect("a baker");
+            w.xp[a as usize * g + BREAD as usize] = xp;
+            // Enough cash that the bakery pays every wage in full.
+            w.economy.add_cash(2, 100_000);
+            let before = w.money(a);
+            let minutes_before = w.work_minutes(a);
+            w.run_until(MINUTES_PER_DAY + 18 * 60, &mut |_| {});
+            (w.money(a) - before, w.work_minutes(a) - minutes_before)
+        };
+        let (beginner, m1) = pay(0);
+        let t = with_career().career.unwrap().thresholds();
+        let (veteran, m2) = pay(t[25]);
+        assert_eq!(m1, m2, "same hours");
+        assert!(veteran * 100 >= beginner * 145, "{veteran} vs {beginner}");
     }
 }

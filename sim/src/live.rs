@@ -235,7 +235,19 @@ impl Live {
             .collect();
         let gens: Vec<u32> = (0..w.agent_count()).map(|a| w.generation(a)).collect();
         let traits: Vec<&[u32]> = (0..w.agent_count()).map(|a| w.traits(a)).collect();
-        let _ = write!(t, "\"priceIndex\":{},\"associations\":[", s.price_index);
+        // Level in the profession of the agent's job (-1: no job).
+        let levels: Vec<i64> = (0..w.agent_count())
+            .map(|a| {
+                w.employer(a)
+                    .map_or(-1, |b| w.level(a, w.economy().config(b).output) as i64)
+            })
+            .collect();
+        let _ = write!(
+            t,
+            "\"levels\":{levels:?},\"meanLevel\":{},\"priceIndex\":{},\"associations\":[",
+            s.mean_level_tenths as f64 / 10.0,
+            s.price_index
+        );
         for (a, ac) in c.associations.iter().enumerate() {
             let sep = if a > 0 { "," } else { "" };
             let values = w.association_rule_values(a as u32);

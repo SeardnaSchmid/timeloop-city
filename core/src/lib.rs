@@ -5,6 +5,7 @@
 
 pub mod assoc;
 pub mod behaviour;
+pub mod career;
 pub mod economy;
 pub mod formula;
 pub mod hash;
@@ -21,6 +22,7 @@ pub use behaviour::{
     variable_names, ActionRule, Allowed, Behaviour, Candidate, Explanation, FoundingRule,
     HousingRule, Population, BASE_VARS, MAX_TRAITS,
 };
+pub use career::CareerConfig;
 pub use economy::{BusinessConfig, BusinessId, Economy, GoodId, MarketConfig, RecipeInput};
 pub use formula::{Formula, FormulaError};
 pub use hash::{StateHash, StateHasher};

@@ -25,7 +25,7 @@ staff, stock, employment, hunger, meals, work hours, money Gini, share of
 time spent starving, rent and tenants per house, homeless, mean commute,
 founded firms open / founded / closed, money held by firm owners, deaths,
 births, newcomers, mean age, people in education and retired, price index,
-treasury per association):
+treasury per association, mean level of workers):
 
 ```bash
 cargo run --release -p timeloop-sim -- --days 3650 --stats stats.csv --quiet
@@ -74,6 +74,14 @@ town. The same day someone new takes the free place: mostly a child of a
 living agent aged 20-50 (population and traits close to the parent's),
 otherwise a newcomer, entering at 16 with no money. Childhood is not
 simulated. A business stores at most four times its output target.
+
+Every kind of business is a profession (`[career]`), as in Ages of Echo:
+an hour of work gives experience in it, level 1 needs 50 and each further
+level 6% more; every level adds 2% output and 2% wage, and businesses hire
+the most experienced job seeker first. Prices clear daily: each moves by the
+ratio of demand (sold plus buyers who found nothing) plus target stock to
+what was on offer, at most 5% a day (`market.price_change_percent`); prices
+are kept in thousandths, sales use them rounded.
 
 Associations (`[[association]]`) are guilds (covering some goods; members are
 the businesses making them) or the town council (covering every good;
@@ -124,7 +132,9 @@ that vacancy settles, rents stay bounded and commutes get shorter;
 `sim/tests/firms.rs` checks over six seeds of 20 years that firms get founded
 and survive, the town stays fed and owners hold less than half the money;
 `sim/tests/life.rs` runs 80 years and checks deaths, births, newcomers and
-the age structure; `sim/tests/guilds.rs` checks that the guild's minimum
+the age structure; `sim/tests/careers.rs` checks that workers level up, the
+experienced save more, prices change by under 5% a day and hunger stays
+below iteration 5; `sim/tests/guilds.rs` checks that the guild's minimum
 price visibly raises the price index.
 
 `content/data/world.toml` points at its schema, so editors with TOML schema
