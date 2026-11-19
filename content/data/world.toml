@@ -112,6 +112,22 @@ when = "money >= house.rent * 2"
 score = "400 - house.rent * 10 - house.distance * 15 + house.current * 30"
 homeless_score = "0"
 
+# Associations meet weekly: collect dues, pay out their treasury, decide
+# their rules (formulas over market.price, market.cost, market.shortage,
+# market.firms, assoc.cash, assoc.members, day).
+# The bakers' guild keeps bread from being sold below cost plus half,
+# takes 5% of its members' sales and charges for opening a new bakery; its
+# treasury goes back to the bakeries.
+[[association]]
+name = "bakers guild"
+goods = ["bread"]
+rules = { min_price = "market.cost * 150 / 100", dues_percent = "5", founding_fee = "200" }
+
+# The town council: 5% on every meal, paid out as welfare.
+[[association]]
+name = "town council"
+rules = { sales_tax_percent = "5" }
+
 [traits]
 # Character traits, 0-1000. Formulas read them as trait.<name>.
 # greed: money matters more than free time. work_life: free time and rest matter more.

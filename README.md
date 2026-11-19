@@ -24,7 +24,8 @@ Add `--stats FILE` to write one CSV row per day (money of agents, businesses and
 staff, stock, employment, hunger, meals, work hours, money Gini, share of
 time spent starving, rent and tenants per house, homeless, mean commute,
 founded firms open / founded / closed, money held by firm owners, deaths,
-births, newcomers, mean age, people in education and retired):
+births, newcomers, mean age, people in education and retired, price index,
+treasury per association):
 
 ```bash
 cargo run --release -p timeloop-sim -- --days 3650 --stats stats.csv --quiet
@@ -74,6 +75,18 @@ living agent aged 20-50 (population and traits close to the parent's),
 otherwise a newcomer, entering at 16 with no money. Childhood is not
 simulated. A business stores at most four times its output target.
 
+Associations (`[[association]]`) are guilds (covering some goods; members are
+the businesses making them) or the town council (covering every good;
+members are all people). Once a week each collects dues, pays out its
+treasury (a guild to its member businesses, the council into welfare) and
+decides its rules anew from formulas. Rules change what actions cost or
+allow: `min_price` / `max_price` for sellers, `founding_fee` for founders
+(`market.fee` in the founding formulas), `dues_percent` on members' sales,
+`sales_tax_percent` on every meal (included in `food_price`). The bundled
+bakers' guild sets bread's minimum price to cost plus half, takes 5% dues and
+200 per new bakery; the council taxes meals by 5%. The price index is what
+the cheapest meal costs, tax included, in percent of bread's starting price.
+
 To watch and steer the town live, start the engine as a local server and
 open the page it prints. The engine runs natively in its own thread for up to
 80 years (`--years N` to change); the page shows the map as it is right now,
@@ -111,7 +124,8 @@ that vacancy settles, rents stay bounded and commutes get shorter;
 `sim/tests/firms.rs` checks over six seeds of 20 years that firms get founded
 and survive, the town stays fed and owners hold less than half the money;
 `sim/tests/life.rs` runs 80 years and checks deaths, births, newcomers and
-the age structure.
+the age structure; `sim/tests/guilds.rs` checks that the guild's minimum
+price visibly raises the price index.
 
 `content/data/world.toml` points at its schema, so editors with TOML schema
 support (Taplo / Even Better TOML) autocomplete and validate it. After changing

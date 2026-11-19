@@ -9,7 +9,7 @@ use timeloop_core::{Allowed, Minute, StateHash, World, WorldConfig, MINUTES_PER_
 pub const DAYS_PER_YEAR: u64 = timeloop_core::DAYS_PER_YEAR;
 pub const YEAR: Minute = DAYS_PER_YEAR * MINUTES_PER_DAY;
 /// Values per day in [`Live::history`].
-pub const HISTORY_FIELDS: usize = 6;
+pub const HISTORY_FIELDS: usize = 7;
 
 pub struct Live {
     world: World,
@@ -18,7 +18,7 @@ pub struct Live {
     end: Minute,
     /// `checkpoints[y]` is the world at the start of year `y`.
     checkpoints: Vec<World>,
-    /// Per finished day: employed, homeless, food price, starving ‰, money Gini ‰, open firms.
+    /// Per finished day: employed, homeless, food price, starving ‰, money Gini ‰, open firms, price index.
     history: Vec<i64>,
     starving_before: u64,
     /// Bumped whenever history is cut (rewind, restart), so viewers refetch it.
@@ -81,6 +81,7 @@ impl Live {
             starving as i64,
             s.money_gini_permille as i64,
             s.firms as i64,
+            s.price_index,
         ]);
         if w.now().is_multiple_of(YEAR) && self.checkpoints.len() as u64 == w.now() / YEAR {
             self.checkpoints.push(w.clone());
@@ -111,7 +112,7 @@ impl Live {
             t,
             "{{\"w\":{},\"h\":{},\"landBase\":{},\"landRadius\":{},\"end\":{},\"agents\":{},\
              \"actions\":[\"idle\",\"eat\",\"sleep\",\"work\",\"overtime\",\"wander\",\"travel\"],\
-             \"historyFields\":[\"employed\",\"homeless\",\"food price\",\"starving ‰\",\"money gini ‰\",\"firms\"],\
+             \"historyFields\":[\"employed\",\"homeless\",\"food price\",\"starving ‰\",\"money gini ‰\",\"firms\",\"price index\"],\
              \"businesses\":[",
             m.width,
             m.height,
@@ -234,6 +235,23 @@ impl Live {
             .collect();
         let gens: Vec<u32> = (0..w.agent_count()).map(|a| w.generation(a)).collect();
         let traits: Vec<&[u32]> = (0..w.agent_count()).map(|a| w.traits(a)).collect();
+        let _ = write!(t, "\"priceIndex\":{},\"associations\":[", s.price_index);
+        for (a, ac) in c.associations.iter().enumerate() {
+            let sep = if a > 0 { "," } else { "" };
+            let values = w.association_rule_values(a as u32);
+            let rules: Vec<String> = (ac.rules.iter().zip(values))
+                .map(|(r, v)| format!("[{},{v}]", json_string(r.kind.name())))
+                .collect();
+            let _ = write!(
+                t,
+                "{sep}{{\"name\":{},\"cash\":{},\"members\":{},\"rules\":[{}]}}",
+                json_string(&ac.name),
+                s.assoc_cash[a],
+                w.association_members(a as u32),
+                rules.join(",")
+            );
+        }
+        t.push_str("],");
         let _ = write!(
             t,
             "\"ages\":{ages:?},\"stages\":{stages:?},\"parents\":{parents:?},\"generations\":{gens:?},\"traits\":{traits:?},\"land\":["

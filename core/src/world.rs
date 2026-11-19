@@ -8,6 +8,7 @@
 
 use std::fmt;
 
+use crate::assoc::{avar, AssocKind, AssociationConfig, RuleKind, ASSOC_VARS, WEEK_DAYS};
 use crate::behaviour::{var, Allowed, Behaviour, Candidate, Explanation, Population, MAX_VARS};
 use crate::economy::{BusinessConfig, BusinessId, Economy, GoodId, MarketConfig};
 use crate::hash::{StateHash, StateHasher};
@@ -58,6 +59,8 @@ pub struct WorldConfig {
     pub behaviour: Behaviour,
     /// Ageing, death and new people; `None`: everyone works forever.
     pub life: Option<LifeConfig>,
+    /// Guilds and the town council, in ID order.
+    pub associations: Vec<AssociationConfig>,
 
     pub hunger_per_hour: u32,
     /// Hunger at which a running action is interrupted to go eat.
@@ -231,6 +234,13 @@ pub enum LogEntry {
         agent: u32,
         change: LifeChange,
     },
+    /// An association set a rule to a new value.
+    Rule {
+        at: Minute,
+        assoc: u32,
+        rule: RuleKind,
+        value: i64,
+    },
 }
 
 fn clock(at: Minute) -> String {
@@ -317,6 +327,17 @@ impl fmt::Display for LogEntry {
                 }
                 LifeChange::Arrived => write!(f, "{} a{agent} moved to town", clock(at)),
             },
+            LogEntry::Rule {
+                at,
+                assoc,
+                rule,
+                value,
+            } => write!(
+                f,
+                "{} association {assoc} sets {} = {value}",
+                clock(at),
+                rule.name()
+            ),
         }
     }
 }
@@ -372,6 +393,11 @@ pub struct Stats {
     pub mean_age: u32,
     pub in_education: u32,
     pub retired: u32,
+    /// What the cheapest meal costs a customer (tax included), in percent
+    /// of the food's starting price.
+    pub price_index: i64,
+    /// Treasury per association, in association order.
+    pub assoc_cash: Vec<i64>,
 }
 
 #[derive(Clone, Debug)]
@@ -420,6 +446,10 @@ pub struct World {
     arrivals: u64,
     /// Wage share collected for those in education or retired, paid out daily.
     pension_fund: i64,
+    /// Treasury per association.
+    assoc_cash: Vec<i64>,
+    /// Current value of every rule, per association in rule order.
+    rule_values: Vec<Vec<i64>>,
 }
 
 const NO_PARENT: (u32, u32) = (u32::MAX, u32::MAX);
@@ -508,6 +538,10 @@ impl World {
             births: 0,
             arrivals: 0,
             pension_fund: 0,
+            assoc_cash: vec![0; config.associations.len()],
+            rule_values: (config.associations.iter())
+                .map(|a| vec![0; a.rules.len()])
+                .collect(),
             config,
         }
     }
@@ -691,7 +725,9 @@ impl World {
     /// Savings at which an agent feels safe.
     fn safety_target(&self) -> i64 {
         let b = &self.config.behaviour;
-        b.safety_reserve_days * b.meals_per_day * self.food_list_price()
+        b.safety_reserve_days
+            * b.meals_per_day
+            * self.with_tax(self.config.food, self.food_list_price())
     }
 
     /// Money held by agents and businesses together. Constant over time.
@@ -700,6 +736,7 @@ impl World {
             + self.economy.total_cash()
             + self.housing.total_cash()
             + self.pension_fund
+            + self.assoc_cash.iter().sum::<i64>()
     }
 
     pub fn stats(&self) -> Stats {
@@ -755,6 +792,8 @@ impl World {
             retired: (0..self.config.agents)
                 .filter(|&a| self.stage(a) == Stage::Retired)
                 .count() as u32,
+            price_index: self.price_index(),
+            assoc_cash: self.assoc_cash.clone(),
             money_owners: (0..self.config.agents as usize)
                 .filter(|&i| self.owns[i] != NO_EMPLOYER)
                 .map(|i| self.money[i])
@@ -827,6 +866,9 @@ impl World {
         self.collect_rent(at, log);
         self.housing.adjust_rents();
         self.choose_homes(at, log);
+        if self.day().is_multiple_of(WEEK_DAYS) {
+            self.associations_meet(at, log);
+        }
         self.economy.restock_inputs(hours);
         self.economy.adjust_prices();
         let job_seekers = self.employer.contains(&NO_EMPLOYER);
@@ -1155,7 +1197,9 @@ impl World {
             let mut v = self.vars(agent, self.now);
             for &(t, m) in &kinds {
                 v[var::MARKET_PRICE..=var::MARKET_NEWEST_DAYS].copy_from_slice(&m);
-                if v[var::MONEY] < rule.capital
+                let fee = self.founding_fee(self.economy.config(t).output);
+                v[var::MARKET_FEE] = fee;
+                if v[var::MONEY] < rule.capital + fee
                     || rule.when.as_ref().is_some_and(|f| f.eval(&v) <= 0)
                 {
                     continue;
@@ -1199,6 +1243,12 @@ impl World {
             ..blueprint.clone()
         };
         self.money[i] -= capital;
+        let good = blueprint.output;
+        for a in 0..self.assoc_cash.len() {
+            let fee = self.rule(a, RuleKind::FoundingFee, good);
+            self.money[i] -= fee;
+            self.assoc_cash[a] += fee;
+        }
         let b = self
             .economy
             .open_business(config, agent, at / MINUTES_PER_DAY);
@@ -1475,7 +1525,14 @@ impl World {
                 .economy
                 .cheapest_seller(self.config.food)
                 .expect("decide only picks eat when food is for sale");
-            self.money[i] -= self.economy.sell_one(seller);
+            let price = self.economy.sell_one(seller);
+            let food = self.config.food;
+            self.money[i] -= price;
+            for a in 0..self.assoc_cash.len() {
+                let tax = price * self.rule(a, RuleKind::SalesTaxPercent, food) / 100;
+                self.money[i] -= tax;
+                self.assoc_cash[a] += tax;
+            }
             self.meals_total += 1;
         }
         self.action[i] = action;
@@ -1545,20 +1602,161 @@ impl World {
     }
 
     /// Price of the cheapest food for sale, if any is in stock.
+    /// What the cheapest food in stock costs a customer, tax included.
     fn food_price(&self) -> Option<i64> {
         self.economy
             .cheapest_seller(self.config.food)
-            .map(|b| self.economy.price(b))
+            .map(|b| self.with_tax(self.config.food, self.economy.price(b)))
+    }
+
+    /// A shop price plus the sales taxes on `good`.
+    fn with_tax(&self, good: GoodId, price: i64) -> i64 {
+        let tax: i64 = (0..self.assoc_cash.len())
+            .map(|a| price * self.rule(a, RuleKind::SalesTaxPercent, good) / 100)
+            .sum();
+        price + tax
+    }
+
+    /// Current value of association `a`'s rule of `kind` for `good`; 0 if
+    /// it has none or does not cover the good.
+    fn rule(&self, a: usize, kind: RuleKind, good: GoodId) -> i64 {
+        let c = &self.config.associations[a];
+        match c.rule_index(kind) {
+            Some(r) if c.covers(good) => self.rule_values[a][r],
+            _ => 0,
+        }
+    }
+
+    /// Fees for founding a firm making `good`, summed over associations.
+    fn founding_fee(&self, good: GoodId) -> i64 {
+        (0..self.assoc_cash.len())
+            .map(|a| self.rule(a, RuleKind::FoundingFee, good))
+            .sum()
+    }
+
+    fn price_index(&self) -> i64 {
+        let food = self.config.food;
+        let start = (self.config.businesses.iter())
+            .find(|b| b.output == food)
+            .map_or(0, |b| b.start_price);
+        if start <= 0 {
+            return 0;
+        }
+        self.with_tax(food, self.food_list_price()) * 100 / start
+    }
+
+    /// Current value of every rule of association `a`, in rule order.
+    pub fn association_rule_values(&self, a: u32) -> &[i64] {
+        &self.rule_values[a as usize]
+    }
+
+    /// Members of association `a`: businesses making its goods, or people.
+    pub fn association_members(&self, a: u32) -> u32 {
+        let c = &self.config.associations[a as usize];
+        match &c.kind {
+            AssocKind::Council => self.config.agents,
+            AssocKind::Guild { .. } => (0..self.economy.len())
+                .filter(|&b| self.economy.is_open(b) && c.covers(self.economy.config(b).output))
+                .count() as u32,
+        }
+    }
+
+    /// Weekly: dues come in, treasuries go out (a guild's to its member
+    /// businesses, the council's to the welfare), then every rule is decided
+    /// anew and price bounds follow.
+    fn associations_meet(&mut self, at: Minute, log: &mut impl FnMut(LogEntry)) {
+        let n = self.config.associations.len();
+        for b in 0..self.economy.len() {
+            let revenue = self.economy.take_revenue(b);
+            if !self.economy.is_open(b) {
+                continue;
+            }
+            let good = self.economy.config(b).output;
+            for a in 0..n {
+                let due = revenue * self.rule(a, RuleKind::DuesPercent, good) / 100;
+                self.assoc_cash[a] += self.economy.pay(b, due);
+            }
+        }
+        for a in 0..n {
+            let cash = std::mem::take(&mut self.assoc_cash[a]);
+            let c = &self.config.associations[a];
+            match &c.kind {
+                AssocKind::Council => self.housing.add_cash(0, cash),
+                AssocKind::Guild { .. } => {
+                    let members: Vec<BusinessId> = (0..self.economy.len())
+                        .filter(|&b| {
+                            self.economy.is_open(b) && c.covers(self.economy.config(b).output)
+                        })
+                        .collect();
+                    if members.is_empty() {
+                        self.assoc_cash[a] = cash;
+                        continue;
+                    }
+                    let share = cash / members.len() as i64;
+                    for &b in &members {
+                        self.economy.add_cash(b, share);
+                    }
+                    self.assoc_cash[a] = cash - share * members.len() as i64;
+                }
+            }
+        }
+        for a in 0..n {
+            let c = &self.config.associations[a];
+            let good = match &c.kind {
+                AssocKind::Guild { goods } => goods.first().copied(),
+                AssocKind::Council => Some(self.config.food),
+            };
+            let mut v = [0i64; ASSOC_VARS.len()];
+            if let Some(t) = good.and_then(|g| self.blueprint_of(g)) {
+                v[avar::MARKET..avar::MARKET + 4].copy_from_slice(&self.market_vars(t)[..4]);
+            }
+            v[avar::CASH] = self.assoc_cash[a];
+            v[avar::MEMBERS] = self.association_members(a as u32) as i64;
+            v[avar::DAY] = self.day() as i64;
+            for (r, rule) in c.rules.iter().enumerate() {
+                let value = rule.value.eval(&v).max(0);
+                if value != self.rule_values[a][r] {
+                    self.rule_values[a][r] = value;
+                    log(LogEntry::Rule {
+                        at,
+                        assoc: a as u32,
+                        rule: rule.kind,
+                        value,
+                    });
+                }
+            }
+        }
+        for g in 0..self.config.goods.len() as GoodId {
+            let (mut lo, mut hi) = (0, i64::MAX);
+            for (a, c) in self.config.associations.iter().enumerate() {
+                if !c.covers(g) {
+                    continue;
+                }
+                if let Some(r) = c.rule_index(RuleKind::MinPrice) {
+                    lo = lo.max(self.rule_values[a][r]);
+                }
+                if let Some(r) = c.rule_index(RuleKind::MaxPrice) {
+                    hi = hi.min(self.rule_values[a][r]);
+                }
+            }
+            self.economy.set_price_bounds(g, lo, hi);
+        }
+    }
+
+    fn blueprint_of(&self, good: GoodId) -> Option<BusinessId> {
+        (self.config.businesses.iter())
+            .position(|b| b.output == good)
+            .map(|b| b as BusinessId)
     }
 
     fn can_buy_food(&self, i: usize) -> bool {
         self.food_price().is_some_and(|p| self.money[i] >= p)
     }
 
-    /// Lowest food price, whether in stock or not. 0 if nobody makes food.
+    /// Lowest shop price of food among open makers, in stock or not. 0 if
+    /// nobody makes food.
     fn food_list_price(&self) -> i64 {
-        (0..self.economy.len())
-            .filter(|&b| self.economy.config(b).output == self.config.food)
+        (self.economy.producers(self.config.food))
             .map(|b| self.economy.price(b))
             .min()
             .unwrap_or(0)
@@ -1582,7 +1780,7 @@ impl World {
         v[var::SAFETY] = self.safety(agent) as i64;
         v[var::MONEY] = self.money[i];
         v[var::WAGE] = if employed { self.economy.wage(b) } else { 0 };
-        v[var::FOOD_PRICE] = self.food_list_price();
+        v[var::FOOD_PRICE] = self.with_tax(c.food, self.food_list_price());
         v[var::CAN_EAT] = self.can_buy_food(i) as i64;
         v[var::EMPLOYED] = employed as i64;
         v[var::HOUR] = hour as i64;
@@ -1813,6 +2011,8 @@ impl StateHash for World {
         h.write_u64(self.births);
         h.write_u64(self.arrivals);
         h.write_i64(self.pension_fund);
+        h.write_i64_slice(&self.assoc_cash);
+        self.rule_values.iter().for_each(|v| h.write_i64_slice(v));
     }
 }
 
@@ -1936,6 +2136,7 @@ pub(crate) mod tests {
             }],
             behaviour: behaviour(&RULES),
             life: None,
+            associations: Vec::new(),
             hunger_per_hour: 40,
             hunger_critical: 800,
             fatigue_per_hour: 40,
@@ -2653,5 +2854,190 @@ mod life_tests {
         w.run_days(400);
         assert_eq!(w.stats().deaths_total, 0);
         assert!((0..w.agent_count()).all(|a| w.stage(a) == Stage::Working));
+    }
+}
+
+#[cfg(test)]
+mod assoc_tests {
+    use super::tests::config;
+    use super::*;
+    use crate::assoc::Rule;
+    use crate::behaviour::FoundingRule;
+    use crate::economy::tests::BREAD;
+    use crate::formula::Formula;
+
+    fn rule(kind: RuleKind, src: &str) -> Rule {
+        let value = Formula::compile(src, &ASSOC_VARS).unwrap();
+        Rule { kind, value }
+    }
+
+    fn with(assocs: Vec<AssociationConfig>) -> WorldConfig {
+        let mut c = config();
+        c.associations = assocs;
+        c
+    }
+
+    fn guild(rules: Vec<Rule>) -> AssociationConfig {
+        AssociationConfig {
+            name: "bakers".into(),
+            kind: AssocKind::Guild { goods: vec![BREAD] },
+            rules,
+        }
+    }
+
+    fn council(rules: Vec<Rule>) -> AssociationConfig {
+        AssociationConfig {
+            name: "council".into(),
+            kind: AssocKind::Council,
+            rules,
+        }
+    }
+
+    #[test]
+    fn rules_are_decided_weekly_and_logged() {
+        let mut w = World::new(
+            1,
+            with(vec![guild(vec![rule(RuleKind::MinPrice, "day + 1")])]),
+        );
+        let mut logged = Vec::new();
+        w.run_until(15 * MINUTES_PER_DAY, &mut |e| {
+            if let LogEntry::Rule { value, .. } = e {
+                logged.push(value);
+            }
+        });
+        assert_eq!(logged, [1, 8, 15]);
+        assert_eq!(w.association_rule_values(0), [15]);
+        assert_eq!(w.economy().price_bounds(BREAD), (15, i64::MAX));
+    }
+
+    #[test]
+    fn a_minimum_price_holds_for_every_bakery() {
+        let mut w = World::new(1, with(vec![guild(vec![rule(RuleKind::MinPrice, "90")])]));
+        w.run_days(3);
+        let e = w.economy();
+        for b in e.producers(BREAD) {
+            assert!(e.price(b) >= 90);
+        }
+        assert!(w.stats().price_index >= 90 * 100 / 35);
+    }
+
+    #[test]
+    fn a_maximum_price_caps_the_council_wide() {
+        let mut w = World::new(1, with(vec![council(vec![rule(RuleKind::MaxPrice, "4")])]));
+        w.run_days(2);
+        let e = w.economy();
+        assert!((0..e.len()).all(|b| e.price(b) <= 4));
+    }
+
+    #[test]
+    fn sales_tax_goes_to_the_treasury_and_money_stays() {
+        let mut w = World::new(
+            2,
+            with(vec![council(vec![rule(RuleKind::SalesTaxPercent, "10")])]),
+        );
+        let supply = w.money_supply();
+        w.run_until(MINUTES_PER_DAY * 6 + 600, &mut |_| {});
+        assert!(w.stats().assoc_cash[0] > 0, "meals were taxed");
+        assert_eq!(w.money_supply(), supply);
+        // The council pays its treasury into welfare at the weekly meeting.
+        w.run_until(7 * MINUTES_PER_DAY, &mut |_| {});
+        assert_eq!(w.stats().assoc_cash[0], 0);
+        assert_eq!(w.money_supply(), supply);
+    }
+
+    #[test]
+    fn customers_pay_price_plus_tax() {
+        let mut w = World::new(
+            2,
+            with(vec![council(vec![rule(RuleKind::SalesTaxPercent, "20")])]),
+        );
+        w.run_days(1);
+        let price = w.food_list_price();
+        assert_eq!(w.with_tax(BREAD, price), price + price / 5);
+        let v = w.vars(0, w.now);
+        assert_eq!(
+            v[var::FOOD_PRICE],
+            price + price / 5,
+            "food_price is what eating costs"
+        );
+    }
+
+    #[test]
+    fn dues_on_revenue_go_to_the_council_and_into_welfare() {
+        let mut w = World::new(
+            3,
+            with(vec![council(vec![rule(RuleKind::DuesPercent, "50")])]),
+        );
+        w.run_until(7 * MINUTES_PER_DAY - 1, &mut |_| {});
+        let mut e = w.economy.clone();
+        let expected: i64 = (0..e.len())
+            .map(|b| {
+                let due = e.take_revenue(b) * 50 / 100;
+                due.min(e.cash(b)).max(0)
+            })
+            .sum();
+        assert!(expected > 0, "businesses sold something");
+        let (welfare, supply) = (w.housing.total_cash(), w.money_supply());
+        let now = w.now;
+        w.associations_meet(now, &mut |_| {});
+        assert_eq!(w.housing.total_cash() - welfare, expected);
+        assert_eq!(w.money_supply(), supply);
+        let mut e = w.economy.clone();
+        assert!(
+            (0..e.len()).all(|b| e.take_revenue(b) == 0),
+            "revenue counts anew"
+        );
+    }
+
+    #[test]
+    fn a_guild_shares_its_treasury_among_member_businesses() {
+        let mut w = World::new(3, with(vec![guild(vec![])]));
+        w.run_days(1);
+        w.assoc_cash[0] = 101;
+        w.money[0] -= 101; // keep the books balanced
+        let bakeries: Vec<_> = w.economy.producers(BREAD).collect();
+        let before: Vec<i64> = bakeries.iter().map(|&b| w.economy.cash(b)).collect();
+        let now = w.now;
+        w.associations_meet(now, &mut |_| {});
+        let n = bakeries.len() as i64;
+        for (k, &b) in bakeries.iter().enumerate() {
+            assert_eq!(w.economy.cash(b) - before[k], 101 / n);
+        }
+        assert_eq!(w.assoc_cash[0], 101 % n);
+    }
+
+    #[test]
+    fn founders_pay_the_guild_fee() {
+        let mut c = with(vec![guild(vec![rule(RuleKind::FoundingFee, "50")])]);
+        let names = crate::behaviour::variable_names(&c.traits);
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let f = |s: &str| Formula::compile(s, &names).unwrap();
+        c.behaviour.founding = Some(FoundingRule {
+            when: Some(f(
+                "market.firms == 1 && market.price > 30 && market.fee == 50",
+            )),
+            score: f("1"),
+            close_when: f("0"),
+            capital: 100,
+            profit_tax_percent: 0,
+            max_firms: 1,
+        });
+        let mut w = World::new(1, c);
+        let supply = w.money_supply();
+        let mut founder = None;
+        w.run_until(3 * MINUTES_PER_DAY, &mut |e| {
+            if let LogEntry::Firm {
+                agent,
+                change: FirmChange::Founded { .. },
+                ..
+            } = e
+            {
+                founder = Some(agent);
+            }
+        });
+        assert!(founder.is_some(), "a bakery was founded");
+        // Fee paid on day 1 or 2; the guild meets on day 7.
+        assert_eq!(w.stats().assoc_cash[0], 50);
+        assert_eq!(w.money_supply(), supply);
     }
 }

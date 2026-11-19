@@ -81,6 +81,10 @@ pub struct Economy {
     broke_days: Vec<u32>,
     /// Per good: how often it ran short lately, 0-1000 (smoothed daily).
     short_recent: Vec<u32>,
+    /// Money taken in from sales since it was last read (for dues).
+    revenue: Vec<i64>,
+    /// Per good: lowest and highest price a seller may ask (rules of associations).
+    price_bounds: Vec<(i64, i64)>,
 }
 
 impl Economy {
@@ -105,6 +109,8 @@ impl Economy {
             opened_day: vec![0; n],
             broke_days: vec![0; n],
             short_recent: vec![0; goods],
+            revenue: vec![0; n],
+            price_bounds: vec![(0, i64::MAX); goods],
             config,
             market,
         }
@@ -129,6 +135,7 @@ impl Economy {
                 self.open.push(false);
                 self.opened_day.push(0);
                 self.broke_days.push(0);
+                self.revenue.push(0);
                 self.config.len() - 1
             }
         };
@@ -145,6 +152,7 @@ impl Economy {
         self.open[b] = true;
         self.opened_day[b] = day;
         self.broke_days[b] = 0;
+        self.revenue[b] = 0;
         self.config[b] = config;
         b as BusinessId
     }
@@ -266,8 +274,23 @@ impl Economy {
         *s -= 1;
         let price = self.price(b);
         self.cash[b as usize] += price;
+        self.revenue[b as usize] += price;
         self.sold_today[b as usize] += 1;
         price
+    }
+
+    /// Revenue since the last call, which starts counting again.
+    pub fn take_revenue(&mut self, b: BusinessId) -> i64 {
+        std::mem::take(&mut self.revenue[b as usize])
+    }
+
+    /// Sets the price range sellers of `good` must keep to.
+    pub fn set_price_bounds(&mut self, good: GoodId, min: i64, max: i64) {
+        self.price_bounds[good as usize] = (min, max);
+    }
+
+    pub fn price_bounds(&self, good: GoodId) -> (i64, i64) {
+        self.price_bounds[good as usize]
     }
 
     pub fn add_worker(&mut self, b: BusinessId) {
@@ -365,6 +388,7 @@ impl Economy {
                 *self.stock_mut(buyer, input.good) += qty;
                 self.cash[buyer as usize] -= price * qty as i64;
                 self.cash[seller as usize] += price * qty as i64;
+                self.revenue[seller as usize] += price * qty as i64;
                 self.sold_today[seller as usize] += qty;
                 self.last_input_price[buyer as usize] = price;
                 want -= qty;
@@ -403,6 +427,10 @@ impl Economy {
                 self.unit_cost(b)
             };
             self.price[i] = self.price[i].max(m.price_min).max(floor);
+            // Rules of associations come last: a minimum price holds even
+            // below cost, a maximum even when it means selling at a loss.
+            let (lo, hi) = self.price_bounds[c.output as usize];
+            self.price[i] = self.price[i].max(lo).min(hi);
         }
         for (r, s) in self.short_recent.iter_mut().zip(short) {
             *r = (7 * *r + 1000 * s as u32) / 8;
@@ -461,6 +489,11 @@ impl Economy {
         self.opened_day.iter().for_each(|&d| h.write_u64(d));
         h.write_u32_slice(&self.broke_days);
         h.write_u32_slice(&self.short_recent);
+        h.write_i64_slice(&self.revenue);
+        for &(lo, hi) in &self.price_bounds {
+            h.write_i64(lo);
+            h.write_i64(hi);
+        }
         for c in &self.config {
             c.pos.hash_into(h);
             h.write_u32(c.output);
@@ -619,6 +652,27 @@ pub(crate) mod tests {
         assert_eq!(e.cheapest_seller(BREAD), None);
         assert_eq!(e.open_business(c, 8, 9), 3);
         assert_eq!(e.len(), 4);
+    }
+
+    #[test]
+    fn price_bounds_override_the_market() {
+        let mut e = Economy::new(3, chain(), market());
+        e.set_price_bounds(BREAD, 9, 20);
+        e.adjust_prices();
+        assert_eq!(e.price(2), 9, "minimum price");
+        e.set_price_bounds(BREAD, 0, 1);
+        e.adjust_prices();
+        assert_eq!(e.price(2), 1, "maximum price, below cost");
+    }
+
+    #[test]
+    fn sales_count_as_revenue_once() {
+        let mut e = Economy::new(3, chain(), market());
+        *e.stock_mut(2, BREAD) = 2;
+        e.sell_one(2);
+        e.sell_one(2);
+        assert_eq!(e.take_revenue(2), 4);
+        assert_eq!(e.take_revenue(2), 0);
     }
 
     #[test]

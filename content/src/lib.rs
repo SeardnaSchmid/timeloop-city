@@ -9,9 +9,10 @@ use std::{collections::BTreeMap, fmt, fs, path::Path};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use timeloop_core::{
-    variable_names, ActionKind, ActionRule, Behaviour, BusinessConfig, Formula, FoundingRule,
-    HouseConfig, HousingConfig, HousingRule, LifeConfig, MapConfig, MarketConfig, Population, Pos,
-    RecipeInput, WorldConfig, MAX_TRAITS, NEED_MAX,
+    variable_names, ActionKind, ActionRule, AssocKind, AssociationConfig, Behaviour,
+    BusinessConfig, Formula, FoundingRule, GoodId, HouseConfig, HousingConfig, HousingRule,
+    LifeConfig, MapConfig, MarketConfig, Population, Pos, RecipeInput, Rule, RuleKind, WorldConfig,
+    ASSOC_VARS, MAX_TRAITS, NEED_MAX,
 };
 
 /// The bundled default world.
@@ -40,6 +41,9 @@ pub struct WorldFile {
     /// Ageing, education, retirement, death and new people. Without it
     /// nobody ages.
     life: Option<LifeSection>,
+    /// Guilds and the town council, in ID order.
+    #[serde(default)]
+    association: Vec<AssociationSection>,
     needs: NeedsSection,
     meal: MealSection,
     work: WorkSection,
@@ -143,6 +147,26 @@ struct LifeSection {
     pension_percent: u32,
     /// Percent of an estate the town takes for welfare before the children share the rest.
     inheritance_tax_percent: u32,
+}
+
+/// A guild (with `goods`; its members are the businesses making them) or the
+/// town council (without `goods`; covers every good, members are all
+/// people). Once a week it collects dues, pays out its treasury (a guild to
+/// its member businesses, the council into welfare) and decides its rules.
+/// Rule formulas see `market.price`, `market.cost`, `market.shortage`,
+/// `market.firms` (of its first good; the food for the council),
+/// `assoc.cash`, `assoc.members` and `day`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct AssociationSection {
+    name: String,
+    goods: Option<Vec<String>>,
+    /// Rule name -> formula: `min_price`, `max_price` (for sellers of its
+    /// goods), `founding_fee` (paid to it when a firm making its goods is
+    /// founded), `dues_percent` (of members' sales revenue), `sales_tax_percent`
+    /// (on top of every meal of its goods).
+    #[serde(default)]
+    rules: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -588,6 +612,45 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
         }
     };
 
+    let assoc_names: Vec<&str> = ASSOC_VARS.to_vec();
+    let mut associations = Vec::new();
+    for a in &f.association {
+        let kind = match &a.goods {
+            None => AssocKind::Council,
+            Some(goods) => {
+                let mut ids = Vec::new();
+                for g in goods {
+                    let id = f.goods.names.iter().position(|n| n == g).ok_or_else(|| {
+                        ContentError::Invalid(format!(
+                            "association \"{}\": unknown good {g}",
+                            a.name
+                        ))
+                    })?;
+                    ids.push(id as GoodId);
+                }
+                check(
+                    !ids.is_empty(),
+                    format!("association \"{}\": no goods", a.name),
+                )?;
+                AssocKind::Guild { goods: ids }
+            }
+        };
+        let mut rules = Vec::new();
+        for (name, src) in &a.rules {
+            let at = format!("association \"{}\".rules.{name}", a.name);
+            let kind = RuleKind::from_name(name)
+                .ok_or_else(|| ContentError::Invalid(format!("{at}: unknown rule")))?;
+            let value = Formula::compile(src, &assoc_names)
+                .map_err(|e| ContentError::Invalid(format!("{at}: {e}")))?;
+            rules.push(Rule { kind, value });
+        }
+        associations.push(AssociationConfig {
+            name: a.name.clone(),
+            kind,
+            rules,
+        });
+    }
+
     Ok(WorldConfig {
         agents: f.world.agents,
         start_money: f.world.start_money,
@@ -608,6 +671,7 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
         populations,
         behaviour,
         life,
+        associations,
         hunger_per_hour: h.per_hour,
         hunger_critical: h.critical,
         fatigue_per_hour: fa.per_hour,
@@ -754,6 +818,12 @@ mod tests {
             ("output = \"flour\"", "output = \"flower\""),
             ("capital = 300", "capital = 0"),
             ("retirement_age = 65", "retirement_age = 10"),
+            ("dues_percent = \"5\"", "dues_pct = \"5\""),
+            ("goods = [\"bread\"]", "goods = [\"cake\"]"),
+            (
+                "sales_tax_percent = \"5\"",
+                "sales_tax_percent = \"need.hunger\"",
+            ),
             ("lifespan = [70, 90]", "lifespan = [90, 70]"),
             ("close = \"", "close = \"firm.bank + "),
         ] {

@@ -11,6 +11,13 @@
         "$ref": "#/$defs/ActionSection"
       }
     },
+    "association": {
+      "description": "Guilds and the town council, in ID order.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/AssociationSection"
+      }
+    },
     "business": {
       "description": "Businesses in ID order. Order matters: ties go to the lower ID.",
       "type": "array",
@@ -122,6 +129,36 @@
       "additionalProperties": false,
       "required": [
         "score"
+      ]
+    },
+    "AssociationSection": {
+      "description": "A guild (with `goods`; its members are the businesses making them) or the\ntown council (without `goods`; covers every good, members are all\npeople). Once a week it collects dues, pays out its treasury (a guild to\nits member businesses, the council into welfare) and decides its rules.\nRule formulas see `market.price`, `market.cost`, `market.shortage`,\n`market.firms` (of its first good; the food for the council),\n`assoc.cash`, `assoc.members` and `day`.",
+      "type": "object",
+      "properties": {
+        "goods": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "rules": {
+          "description": "Rule name -> formula: `min_price`, `max_price` (for sellers of its\ngoods), `founding_fee` (paid to it when a firm making its goods is\nfounded), `dues_percent` (of members' sales revenue), `sales_tax_percent`\n(on top of every meal of its goods).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
       ]
     },
     "BusinessSection": {

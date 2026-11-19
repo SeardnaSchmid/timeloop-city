@@ -11,7 +11,7 @@
   --eat: #d9822b; --sleep: #6c63c9; --work: #2b8a5e; --overtime: #0f5c3d;
   --wander: #9aa0a6; --travel: #2f7fd1; --idle: #c9ccd1;
   --field: #8fb339; --mill: #c9a227; --bakery: #b5652d; --house: #4a78b5; --other: #7a7f87;
-  --sel: #e0245e; --s1: #2b8a5e; --s2: #4a78b5; --s3: #d9822b; --s4: #c0392b; --s5: #8e6cc9; --s6: #3aa6a6;
+  --sel: #e0245e; --s1: #2b8a5e; --s2: #4a78b5; --s3: #d9822b; --s4: #c0392b; --s5: #8e6cc9; --s6: #3aa6a6; --s7: #b0843a;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -251,6 +251,9 @@ function draw() {
     ['founded firms open', w.firms], ['money in the world', w.money],
     ['mean age', w.meanAge], ['in education / retired', `${w.inEducation} / ${w.retired}`],
     ['deaths / born / moved in', `${w.deaths} / ${w.births} / ${w.newcomers}`],
+    ['price index (meal incl. tax)', w.priceIndex],
+    ...w.associations.map(a => [`${a.name} (${a.members}) · cash ${a.cash}`,
+      a.rules.map(([r, v]) => `${r} ${v}`).join(', ') || '–']),
     ...goods.map(g => [`${g} price (lowest)`, isFinite(cheapest(g)) ? cheapest(g) : '–'])]
     .map(([k, v]) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`).join('');
   showInfo();
@@ -312,7 +315,7 @@ async function refreshExplain() {
 const SERIES = [
   { i: 0, color: '--s1', max: () => L.agents }, { i: 1, color: '--s2', max: () => L.agents },
   { i: 2, color: '--s3' }, { i: 3, color: '--s4', max: () => 1000 }, { i: 4, color: '--s5', max: () => 1000 },
-  { i: 5, color: '--s6' },
+  { i: 5, color: '--s6' }, { i: 6, color: '--s7' },
 ];
 const HF = () => L.historyFields.length;
 async function refreshHistory() {

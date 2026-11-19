@@ -3,6 +3,7 @@
 //! Rules: integers only, randomness only through [`rng`], iteration only in
 //! entity-ID order. Same seed + same inputs = same [`world::World::state_hash`].
 
+pub mod assoc;
 pub mod behaviour;
 pub mod economy;
 pub mod formula;
@@ -15,6 +16,7 @@ pub mod queue;
 pub mod rng;
 pub mod world;
 
+pub use assoc::{AssocKind, AssociationConfig, Rule, RuleKind, ASSOC_VARS, WEEK_DAYS};
 pub use behaviour::{
     variable_names, ActionRule, Allowed, Behaviour, Candidate, Explanation, FoundingRule,
     HousingRule, Population, BASE_VARS, MAX_TRAITS,
