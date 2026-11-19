@@ -8,6 +8,8 @@ use std::io::{self, BufWriter, Write};
 use std::time::SystemTime;
 use std::{path::PathBuf, process::ExitCode};
 
+mod live;
+mod serve;
 mod viewer;
 
 use timeloop_core::{
@@ -17,6 +19,7 @@ use timeloop_core::{
 const USAGE: &str = "\
 Usage: sim [OPTIONS]
        sim explain AGENT TIME [OPTIONS]
+       sim serve [--port N] [OPTIONS]
 
   --seed N       world seed (default 1)
   --days N       number of game days (default 1)
@@ -31,6 +34,9 @@ Usage: sim [OPTIONS]
                  at least 10 minutes; daily or longer steps show noon)
   --log          print every event before each day's hash
   --quiet        print only the final hash
+
+serve runs the engine live (default 80 years, port 7878) and serves a page
+to steer and watch it at http://127.0.0.1:PORT.
 
 explain runs to TIME (minutes, or DAY:HH:MM such as 3:08:00) and shows how
 AGENT scores every action at that moment.";
@@ -48,6 +54,10 @@ struct Args {
     log: bool,
     quiet: bool,
     explain: Option<(u32, Minute)>,
+    serve: bool,
+    port: u16,
+    /// Whether --days or --years was given.
+    days_given: bool,
 }
 
 fn parse_time(s: &str) -> Result<Minute, String> {
@@ -75,9 +85,15 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
         log: false,
         quiet: false,
         explain: None,
+        serve: false,
+        port: 7878,
+        days_given: false,
     };
     let mut it = it.by_ref().peekable();
-    if it.peek().map(String::as_str) == Some("explain") {
+    if it.peek().map(String::as_str) == Some("serve") {
+        it.next();
+        a.serve = true;
+    } else if it.peek().map(String::as_str) == Some("explain") {
         it.next();
         let agent = it.next().ok_or("explain needs AGENT and TIME")?;
         let time = it.next().ok_or("explain needs AGENT and TIME")?;
@@ -87,7 +103,11 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
         let mut value = |name: &str| it.next().ok_or(format!("{name} needs a value"));
         match flag.as_str() {
             "--seed" => a.seed = parse(&value("--seed")?, "--seed")?,
-            "--days" => a.days = parse(&value("--days")?, "--days")?,
+            "--days" => {
+                a.days = parse(&value("--days")?, "--days")?;
+                a.days_given = true;
+            }
+            "--port" => a.port = parse(&value("--port")?, "--port")?,
             "--agents" => a.agents = Some(parse(&value("--agents")?, "--agents")?),
             "--world" => a.world = Some(value("--world")?.into()),
             "--watch" => a.watch = true,
@@ -95,7 +115,10 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
             "--html" => a.html = Some(value("--html")?.into()),
             "--html-days" => a.html_days = Some(parse(&value("--html-days")?, "--html-days")?),
             "--html-step" => a.html_step = Some(parse(&value("--html-step")?, "--html-step")?),
-            "--years" => a.days = 365 * parse::<u64>(&value("--years")?, "--years")?,
+            "--years" => {
+                a.days = 365 * parse::<u64>(&value("--years")?, "--years")?;
+                a.days_given = true;
+            }
             "--log" => a.log = true,
             "--quiet" => a.quiet = true,
             "-h" | "--help" => return Err(String::new()),
@@ -142,6 +165,18 @@ fn main() -> ExitCode {
     };
     if let Some(n) = args.agents {
         config.agents = n;
+    }
+
+    if args.serve {
+        let days = if args.days_given { args.days } else { 80 * 365 };
+        let live = live::Live::new(args.seed, config, days * MINUTES_PER_DAY);
+        return match serve::serve(live, args.port) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("cannot serve on port {}: {e}", args.port);
+                ExitCode::from(1)
+            }
+        };
     }
 
     if let Some((agent, at)) = args.explain {

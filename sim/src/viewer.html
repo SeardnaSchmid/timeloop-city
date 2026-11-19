@@ -102,8 +102,14 @@ const daily = D.step >= 1440; // frames days apart: no in-between motion
 
 $('seek').max = F.length - 1;
 $('span').textContent = `${fmtTime(t0).replace(/ · \d\d:\d\d$/, '')} → ${fmtTime(tEnd).replace(/ · \d\d:\d\d$/, '')} · one frame every ${fmtSpan(D.step)}`;
-// Default speed: the whole recording in about a minute.
-{ const want = (tEnd - t0) / 60, opts = [...$('speed').options];
+// Speeds slower than one frame a second would look frozen: drop them.
+// Default: the whole recording in about a minute.
+{ let opts = [...$('speed').options];
+  opts.filter(o => Number(o.value) < D.step).forEach(o => o.remove());
+  opts = [...$('speed').options];
+  if (!opts.length) $('speed').add(new Option(`${fmtSpan(D.step)}/s`, D.step));
+  opts = [...$('speed').options];
+  const want = (tEnd - t0) / 60;
   (opts.find(o => Number(o.value) >= want) || opts[opts.length - 1]).selected = true; }
 $('legend').innerHTML = D.actions.filter(a => a !== 'idle')
   .map(a => `<span><span class="sw" style="background:var(--${a})"></span>${a}</span>`).join('')
@@ -126,7 +132,8 @@ function agentAt(i, k) { const a = F[i].a, o = k * A;
 
 function draw() {
   const i = Math.floor(playhead), j = Math.min(i + 1, F.length - 1);
-  const f = daily ? 0 : playhead - i;
+  // Days apart, agents jump from frame to frame; the clock still runs on.
+  const ft = playhead - i, f = daily ? 0 : ft;
   const W = D.w * cell, H = D.h * cell;
   ctx.clearRect(0, 0, W, H + cell);
   // Land price, faint.
@@ -201,7 +208,7 @@ function draw() {
   }
   draw.pos = pos;
 
-  $('clock').textContent = fmtTime(Math.round(fr.t + (F[j].t - fr.t) * f));
+  $('clock').textContent = fmtTime(Math.round(fr.t + (F[j].t - fr.t) * ft));
   $('seek').value = playhead;
   const hungry = Array.from({ length: N }, (_, k) => agentAt(i, k).hunger).filter(h => h >= 800).length;
   $('town').innerHTML = [

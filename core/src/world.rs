@@ -432,6 +432,22 @@ impl World {
         self.pos[agent as usize]
     }
 
+    /// Where the agent is right now, in tenths of a parcel. Travellers are
+    /// placed along their way (x first, then y), for smooth display.
+    pub fn position_tenths(&self, agent: u32) -> (u32, u32) {
+        let i = agent as usize;
+        let (p, a) = (self.pos[i], self.action[i]);
+        if a.kind != ActionKind::Travel {
+            return (p.x as u32 * 10, p.y as u32 * 10);
+        }
+        let rate = self.map.config().travel_minutes_per_parcel.max(1);
+        let tenths = (self.now - a.started) * 10 / rate;
+        let (whole, frac) = ((tenths / 10) as u32, (tenths % 10) as i64);
+        let (p1, p2) = (p.toward(a.target, whole), p.toward(a.target, whole + 1));
+        let lerp = |a: u16, b: u16| (a as i64 * 10 + (b as i64 - a as i64) * frac) as u32;
+        (lerp(p1.x, p2.x), lerp(p1.y, p2.y))
+    }
+
     /// Where the agent works, or the town centre if unemployed.
     pub fn work_pos(&self, agent: u32) -> Pos {
         match self.employer[agent as usize] {

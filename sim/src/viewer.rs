@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use std::io;
 use std::path::Path;
 
-use timeloop_core::{ActionKind, Minute, Pos, World, MINUTES_PER_DAY};
+use timeloop_core::{Minute, Pos, World, MINUTES_PER_DAY};
 
 const TEMPLATE: &str = include_str!("viewer.html");
 
@@ -72,7 +72,7 @@ impl Recorder {
         self.count += 1;
         let _ = write!(f, "{{\"t\":{},\"a\":[", w.now());
         for a in 0..w.agent_count() {
-            let (x, y) = position_tenths(w, a);
+            let (x, y) = w.position_tenths(a);
             let action = w.action(a);
             if a > 0 {
                 f.push(',');
@@ -157,22 +157,6 @@ impl Recorder {
         let data = data.replace("</", "<\\/");
         std::fs::write(path, TEMPLATE.replace("/*DATA*/null", &data))
     }
-}
-
-/// Where the agent is, in tenths of a parcel; travellers are placed along
-/// their way (x first, then y), the same path the core uses.
-fn position_tenths(w: &World, agent: u32) -> (u32, u32) {
-    let p = w.pos(agent);
-    let a = w.action(agent);
-    if a.kind != ActionKind::Travel {
-        return (p.x as u32 * 10, p.y as u32 * 10);
-    }
-    let rate = w.config().map.travel_minutes_per_parcel.max(1);
-    let tenths = (w.now() - a.started) * 10 / rate;
-    let (whole, frac) = ((tenths / 10) as u32, (tenths % 10) as i64);
-    let (p1, p2) = (p.toward(a.target, whole), p.toward(a.target, whole + 1));
-    let lerp = |a: u16, b: u16| (a as i64 * 10 + (b as i64 - a as i64) * frac) as u32;
-    (lerp(p1.x, p2.x), lerp(p1.y, p2.y))
 }
 
 fn json_string(s: &str) -> String {

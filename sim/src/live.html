@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timeloop City Live</title>
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #ffffff; --ink: #1f2328; --muted: #6b6f76; --line: #e3e1da;
+  --grid: #ebe9e2; --land: 120, 110, 80; --accent: #2f7fd1;
+  --eat: #d9822b; --sleep: #6c63c9; --work: #2b8a5e; --overtime: #0f5c3d;
+  --wander: #9aa0a6; --travel: #2f7fd1; --idle: #c9ccd1;
+  --field: #8fb339; --mill: #c9a227; --bakery: #b5652d; --house: #4a78b5; --other: #7a7f87;
+  --sel: #e0245e; --s1: #2b8a5e; --s2: #4a78b5; --s3: #d9822b; --s4: #c0392b; --s5: #8e6cc9;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171a; --panel: #1d2024; --ink: #e8e6e1; --muted: #9a9ea5; --line: #2c3035;
+    --grid: #24282d; --land: 230, 210, 150; --accent: #5aa2ee;
+    --wander: #737a82; --idle: #4a4f56; --house: #6f9bd8; --sel: #ff5c8a;
+    --s2: #6f9bd8; --s4: #e8665a; --s5: #a98ce0;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171a; --panel: #1d2024; --ink: #e8e6e1; --muted: #9a9ea5; --line: #2c3035;
+  --grid: #24282d; --land: 230, 210, 150; --accent: #5aa2ee;
+  --wander: #737a82; --idle: #4a4f56; --house: #6f9bd8; --sel: #ff5c8a;
+  --s2: #6f9bd8; --s4: #e8665a; --s5: #a98ce0;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1320px; margin: 0 auto; padding: 16px; display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+header { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+h1 { font-size: 18px; margin: 0 8px 0 0; }
+.clock { font-variant-numeric: tabular-nums; font-size: 18px; min-width: 210px; }
+.muted { color: var(--muted); }
+button, input[type=number] { font: inherit; color: var(--ink); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
+button { cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; min-width: 76px; }
+input[type=number] { width: 80px; }
+.speed { display: flex; align-items: center; gap: 8px; }
+.speed input { width: 180px; }
+.speed output { min-width: 150px; font-variant-numeric: tabular-nums; }
+.map { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+canvas { display: block; }
+#map { cursor: crosshair; }
+aside { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
+.wide { grid-column: 1 / -1; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+td { padding: 2px 0; vertical-align: top; } td.num { text-align: right; }
+tr.win td { font-weight: 600; }
+.formula { font: 11px ui-monospace, monospace; color: var(--muted); word-break: break-word; }
+td.num .formula { white-space: nowrap; }
+td.num { padding-left: 8px; }
+#hist { width: 100%; cursor: pointer; }
+.status { color: var(--muted); font-size: 13px; }
+.error { color: var(--sel); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Timeloop City</h1>
+    <span class="clock" id="clock">connecting…</span>
+    <button class="primary" id="play" title="Space">Play</button>
+    <div class="speed">
+      <input id="speed" type="range" min="0" step="1" aria-label="Speed" title="← / →">
+      <output id="speedLabel"></output>
+    </div>
+    <span class="status" id="status"></span>
+    <span style="flex:1"></span>
+    <label class="muted">seed <input id="seed" type="number" min="0"></label>
+    <button id="restart">Restart</button>
+    <label class="muted"><input id="landToggle" type="checkbox"> land price</label>
+  </header>
+  <div class="map"><canvas id="map"></canvas></div>
+  <aside>
+    <div class="card" id="info"><h2>Selection</h2><div class="muted">Click an agent or a building.</div></div>
+    <div class="card"><h2>Town</h2><table id="town"></table></div>
+    <div class="card"><h2>Agents</h2><div class="legend" id="legend"></div></div>
+  </aside>
+  <div class="card wide">
+    <h2>History · click to jump</h2>
+    <canvas id="hist" height="140" aria-label="History over the whole run; click to jump there"></canvas>
+    <div class="legend" id="histLegend"></div>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const canvas = $('map'), ctx = canvas.getContext('2d');
+const hist = $('hist'), hctx = hist.getContext('2d');
+const AF = 7; // values per agent in the state
+// Game minutes per real second; the last stop is "as fast as possible".
+const SPEEDS = [1, 5, 15, 60, 240, 1440, 10080, 43800, 131400, 525600, 'max'];
+const speedName = v => v === 'max' ? 'max' : v < 60 ? `${v} min/s` : v < 1440 ? `${v / 60} h/s`
+  : v < 10080 ? `${v / 1440} day/s` : v < 43800 ? `${v / 10080} week/s` : v < 525600 ? `${Math.round(v / 43800)} month/s` : '1 year/s';
+const rate = m => m < 60 ? `${Math.round(m)} min/s` : m < 1440 ? `${(m / 60).toFixed(1)} h/s`
+  : m < 43800 ? `${(m / 1440).toFixed(1)} days/s` : `${(m / 525600).toFixed(2)} years/s`;
+const fmtTime = t => { const d = Math.floor(t / 1440), m = t % 1440;
+  return `year ${Math.floor(d / 365)} · day ${d % 365} · ${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
+
+let L = null, S = null, prev = null, stateAt = 0, selected = null, explain = null;
+let history = [], histEpoch = -1, cell = 30;
+
+async function api(path, method = 'GET') {
+  const r = await fetch(path, { method, cache: 'no-store' });
+  if (!r.ok) throw new Error(`${path}: ${r.status}`);
+  return r.json();
+}
+async function control(params) {
+  S = await api('/api/control?' + new URLSearchParams(params), 'POST');
+  syncControls();
+}
+
+$('speed').max = SPEEDS.length - 1;
+$('speed').oninput = () => { const v = SPEEDS[$('speed').value]; $('speedLabel').textContent = speedName(v); control({ speed: v }); };
+$('play').onclick = () => control({ play: S && S.playing ? 0 : 1 });
+$('restart').onclick = () => { selected = null; control({ restart: 1, seed: $('seed').value || 0, play: 0 }); };
+$('landToggle').onchange = () => draw();
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' && e.target.type === 'number') return;
+  if (e.code === 'Space') { e.preventDefault(); $('play').click(); }
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    e.preventDefault();
+    const i = Math.max(0, Math.min(SPEEDS.length - 1, Number($('speed').value) + (e.key === 'ArrowRight' ? 1 : -1)));
+    $('speed').value = i; $('speed').oninput();
+  }
+});
+
+function syncControls() {
+  if (!S) return;
+  $('play').textContent = S.playing ? 'Pause' : 'Play';
+  if (document.activeElement !== $('speed')) {
+    const i = SPEEDS.indexOf(S.speed);
+    if (i >= 0) $('speed').value = i;
+    $('speedLabel').textContent = speedName(S.speed);
+  }
+  if (document.activeElement !== $('seed')) $('seed').value = S.world.seed;
+  $('status').textContent = S.seeking !== null ? `jumping to ${fmtTime(S.seeking)}…`
+    : S.playing || S.effective > 1 ? `running at ${rate(S.effective)}`
+    : S.world.now >= S.end ? 'end of run' : 'paused';
+}
+
+function resize() {
+  const w = canvas.parentElement.clientWidth - 16;
+  cell = Math.max(12, Math.floor(w / L.w));
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = L.w * cell * dpr; canvas.height = (L.h + 1) * cell * dpr;
+  canvas.style.width = L.w * cell + 'px'; canvas.style.height = (L.h + 1) * cell + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const hw = hist.parentElement.clientWidth - 24;
+  hist.width = hw * dpr; hist.height = 140 * dpr; hist.style.width = hw + 'px'; hist.style.height = '140px';
+  hctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw(); drawHistory();
+}
+
+const agent = (st, k) => { const a = st.world.agents, o = k * AF;
+  return { x: a[o] / 10, y: a[o + 1] / 10, act: a[o + 2], hunger: a[o + 3], money: a[o + 4], home: a[o + 5], job: a[o + 6] }; };
+const goodColor = g => ({ grain: '--field', flour: '--mill', bread: '--bakery' }[g] || '--other');
+
+function draw() {
+  if (!L || !S) return;
+  const W = L.w * cell, H = L.h * cell, w = S.world;
+  ctx.clearRect(0, 0, W, H + cell);
+  if ($('landToggle').checked) {
+    const max = Math.max(...w.land), min = Math.min(...w.land), rgb = css('--land');
+    for (let y = 0; y < L.h; y++) for (let x = 0; x < L.w; x++) {
+      ctx.fillStyle = `rgba(${rgb}, ${0.05 + (w.land[y * L.w + x] - min) / Math.max(1, max - min) * 0.35})`;
+      ctx.fillRect(x * cell, y * cell, cell, cell);
+    }
+  }
+  ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1; ctx.beginPath();
+  for (let x = 0; x <= L.w; x++) { ctx.moveTo(x * cell + .5, 0); ctx.lineTo(x * cell + .5, H); }
+  for (let y = 0; y <= L.h; y++) { ctx.moveTo(0, y * cell + .5); ctx.lineTo(W, y * cell + .5); }
+  ctx.stroke();
+
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const label = (txt, x, y) => { ctx.fillStyle = css('--ink'); ctx.font = `${Math.max(9, cell * .32)}px system-ui`;
+    const half = ctx.measureText(txt).width / 2 + 2;
+    ctx.fillText(txt, Math.min(Math.max((x + .5) * cell, half), W - half), (y + 1) * cell + cell * .3); };
+  L.businesses.forEach((b, k) => {
+    ctx.fillStyle = css(goodColor(b.good));
+    ctx.fillRect(b.x * cell + 2, b.y * cell + 2, cell - 4, cell - 4);
+    ctx.fillStyle = '#fff'; ctx.font = `bold ${cell * .45}px system-ui`;
+    ctx.fillText(b.name[0].toUpperCase(), (b.x + .5) * cell, (b.y + .5) * cell);
+    label(`${b.name} ${w.workers[k]}/${b.slots} · ${w.prices[k]}`, b.x, b.y);
+  });
+  L.houses.forEach((h, k) => {
+    const x = h.x * cell + 2, y = h.y * cell + 2, s = cell - 4;
+    ctx.fillStyle = css('--house'); ctx.globalAlpha = .15; ctx.fillRect(x, y, s, s); ctx.globalAlpha = 1;
+    ctx.strokeStyle = css('--house'); ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, s - 2, s - 2); ctx.lineWidth = 1;
+    label(`${h.name} ${w.tenants[k]}/${h.beds} · rent ${w.rent[k]}`, h.x, h.y);
+  });
+  if (selected && selected.type === 'agent') {
+    const a = agent(S, selected.id);
+    for (const p of [a.home >= 0 && L.houses[a.home], a.job >= 0 && L.businesses[a.job]]) {
+      if (!p) continue;
+      ctx.strokeStyle = css('--sel'); ctx.lineWidth = 2;
+      ctx.strokeRect(p.x * cell + 1, p.y * cell + 1, cell - 2, cell - 2); ctx.lineWidth = 1;
+    }
+  }
+
+  // Agents glide from the last state to this one when the clock runs slowly.
+  const f = prev && S.speed !== 'max' && S.speed <= 240 ? Math.min(1, (performance.now() - stateAt) / 120) : 1;
+  const pos = [], groups = new Map();
+  for (let k = 0; k < L.agents; k++) {
+    const a = agent(S, k), b = prev ? agent(prev, k) : a;
+    const x = b.x + (a.x - b.x) * f, y = b.y + (a.y - b.y) * f;
+    const key = Math.round(x) + ',' + Math.round(y);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(k);
+    pos[k] = { x, y, act: a.act };
+  }
+  const r = Math.max(2.5, cell * .11);
+  for (const ks of groups.values()) {
+    const n = ks.length, cols = Math.ceil(Math.sqrt(n));
+    ks.forEach((k, idx) => {
+      const p = pos[k];
+      const ox = n === 1 ? 0 : ((idx % cols) - (cols - 1) / 2) * r * 2.2;
+      const oy = n === 1 ? 0 : (Math.floor(idx / cols) - (Math.ceil(n / cols) - 1) / 2) * r * 2.2;
+      p.cx = (p.x + .5) * cell + ox; p.cy = (p.y + .5) * cell + oy;
+      ctx.beginPath(); ctx.arc(p.cx, p.cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = css('--' + L.actions[p.act]); ctx.fill();
+      ctx.strokeStyle = css('--panel'); ctx.stroke();
+      if (selected && selected.type === 'agent' && selected.id === k) {
+        ctx.beginPath(); ctx.arc(p.cx, p.cy, r + 2.5, 0, Math.PI * 2);
+        ctx.strokeStyle = css('--sel'); ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1;
+      }
+    });
+  }
+  draw.pos = pos;
+
+  $('clock').textContent = fmtTime(w.now);
+  const hungry = Array.from({ length: L.agents }, (_, k) => agent(S, k).hunger).filter(h => h >= 800).length;
+  $('town').innerHTML = [['employed', `${w.employed} / ${L.agents}`], ['homeless', w.homeless], ['hungry (≥800)', hungry],
+    ...L.businesses.map((b, k) => [`${b.good} price`, w.prices[k]])]
+    .map(([k, v]) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`).join('');
+  showInfo();
+}
+
+function showInfo() {
+  if (!selected) return;
+  const w = S.world, el = $('info');
+  let html = '', rows = [];
+  if (selected.type === 'agent') {
+    const a = agent(S, selected.id);
+    html = `<h2>Agent a${selected.id}</h2>`;
+    rows = [['doing', L.actions[a.act]], ['hunger', a.hunger], ['money', a.money],
+      ['home', a.home >= 0 ? L.houses[a.home].name : 'homeless'], ['job', a.job >= 0 ? L.businesses[a.job].name : 'unemployed'],
+      ...L.traits.map((t, n) => [t, L.agentTraits[selected.id][n]])];
+  } else if (selected.type === 'house') {
+    const h = L.houses[selected.id];
+    html = `<h2>House · ${h.name}</h2>`;
+    rows = [['rent / day', w.rent[selected.id]], ['tenants', `${w.tenants[selected.id]} / ${h.beds}`],
+      ['parcel', `(${h.x}, ${h.y})`], ['land price', w.land[h.y * L.w + h.x]]];
+  } else {
+    const b = L.businesses[selected.id];
+    html = `<h2>Business · ${b.name}</h2>`;
+    rows = [['makes', b.good], ['price', w.prices[selected.id]], ['workers', `${w.workers[selected.id]} / ${b.slots}`],
+      ['parcel', `(${b.x}, ${b.y})`]];
+  }
+  html += '<table>' + rows.map(([k, v]) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`).join('') + '</table>';
+  if (selected.type === 'agent' && explain) {
+    html += `<h2 style="margin-top:12px">Would pick now: ${explain.winner}</h2><table>` + explain.candidates.map(c =>
+      `<tr class="${c.kind === explain.winner ? 'win' : ''}"><td>${c.kind}<div class="formula">${c.formula}</div></td>` +
+      `<td class="num">${c.score}<div class="formula">${c.allowed}</div></td></tr>`).join('') + '</table>';
+  }
+  el.innerHTML = html;
+}
+
+canvas.addEventListener('click', e => {
+  const rect = canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  let best = null, bd = (cell * .3) ** 2;
+  (draw.pos || []).forEach((p, k) => { const d = (p.cx - mx) ** 2 + (p.cy - my) ** 2; if (d < bd) { bd = d; best = k; } });
+  explain = null;
+  if (best !== null) { selected = { type: 'agent', id: best }; refreshExplain(); }
+  else {
+    const x = Math.floor(mx / cell), y = Math.floor(my / cell);
+    const h = L.houses.findIndex(h => h.x === x && h.y === y), b = L.businesses.findIndex(b => b.x === x && b.y === y);
+    selected = h >= 0 ? { type: 'house', id: h } : b >= 0 ? { type: 'business', id: b } : null;
+    if (!selected) $('info').innerHTML = '<h2>Selection</h2><div class="muted">Click an agent or a building.</div>';
+  }
+  draw();
+});
+async function refreshExplain() {
+  if (selected && selected.type === 'agent') { explain = await api('/api/explain?agent=' + selected.id); showInfo(); }
+}
+
+// History over the whole run: x is game time from 0 to the end.
+const SERIES = [
+  { i: 0, color: '--s1', max: () => L.agents }, { i: 1, color: '--s2', max: () => L.agents },
+  { i: 2, color: '--s3' }, { i: 3, color: '--s4', max: () => 1000 }, { i: 4, color: '--s5', max: () => 1000 },
+];
+async function refreshHistory() {
+  if (!S) return;
+  if (S.world.epoch !== histEpoch) { history = []; histEpoch = S.world.epoch; }
+  const days = history.length / 5;
+  if (days >= S.world.days) return;
+  const h = await api('/api/history?from=' + days);
+  if (h.epoch !== histEpoch || h.from !== history.length / 5) return;
+  history = history.concat(h.rows);
+  drawHistory();
+}
+function drawHistory() {
+  if (!L) return;
+  const w = hist.clientWidth, h = 140, endDays = L.end / 1440, n = history.length / 5;
+  hctx.clearRect(0, 0, w, h);
+  hctx.fillStyle = css('--muted'); hctx.font = '11px system-ui'; hctx.textAlign = 'center'; hctx.textBaseline = 'bottom';
+  const years = endDays / 365, every = years > 40 ? 10 : years > 10 ? 5 : 1;
+  hctx.strokeStyle = css('--grid'); hctx.beginPath();
+  for (let y = 0; y <= years; y += every) {
+    const x = y * 365 / endDays * w; hctx.moveTo(x + .5, 0); hctx.lineTo(x + .5, h - 14);
+    hctx.fillText(`year ${y}`, Math.min(Math.max(x, 20), w - 24), h);
+  }
+  hctx.stroke();
+  const ph = h - 18;
+  for (const s of SERIES) {
+    const cols = Math.max(1, Math.floor(w)), vals = [];
+    for (let c = 0; c < cols; c++) {
+      const lo = Math.floor(c * endDays / cols), hi = Math.min(n, Math.max(lo + 1, Math.floor((c + 1) * endDays / cols)));
+      if (lo >= n) break;
+      let sum = 0; for (let d = lo; d < hi; d++) sum += history[d * 5 + s.i]; vals.push(sum / (hi - lo));
+    }
+    if (!vals.length) continue;
+    let max = s.max ? s.max() : 1; if (!s.max) for (let d = 0; d < n; d++) max = Math.max(max, history[d * 5 + s.i]);
+    hctx.strokeStyle = css(s.color); hctx.lineWidth = 1.5; hctx.beginPath();
+    vals.forEach((v, c) => { const x = c, y = 2 + ph - v / max * (ph - 4); c ? hctx.lineTo(x, y) : hctx.moveTo(x, y); });
+    hctx.stroke();
+  }
+  if (S) {
+    const x = S.world.now / L.end * w;
+    hctx.strokeStyle = css('--sel'); hctx.lineWidth = 2; hctx.beginPath(); hctx.moveTo(x, 0); hctx.lineTo(x, h - 14); hctx.stroke(); hctx.lineWidth = 1;
+  }
+}
+hist.addEventListener('click', e => {
+  const r = hist.getBoundingClientRect();
+  const to = Math.round(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * L.end / 1440) * 1440 + 8 * 60;
+  control({ seek: Math.min(to, L.end) });
+});
+
+// Poll the engine as often as the screen redraws, one request at a time.
+let inFlight = false, lastError = null;
+async function poll() {
+  if (inFlight) return;
+  inFlight = true;
+  try {
+    const st = await api('/api/state');
+    prev = S && S.world.epoch === st.world.epoch ? S : null; S = st; stateAt = performance.now();
+    lastError = null; syncControls();
+  } catch (err) {
+    if (!lastError) $('status').innerHTML = `<span class="error">engine not reachable – is <code>sim serve</code> running?</span>`;
+    lastError = err;
+  } finally { inFlight = false; }
+}
+function frame() { poll(); draw(); requestAnimationFrame(frame); }
+
+(async () => {
+  try { L = await api('/api/layout'); } catch (e) {
+    $('clock').textContent = 'engine not reachable'; return;
+  }
+  $('legend').innerHTML = L.actions.filter(a => a !== 'idle')
+    .map(a => `<span><span class="sw" style="background:var(--${a})"></span>${a}</span>`).join('');
+  $('histLegend').innerHTML = L.historyFields
+    .map((f, i) => `<span><span class="sw" style="background:var(${SERIES[i].color})"></span>${f}</span>`).join('');
+  await poll();
+  resize();
+  window.addEventListener('resize', resize);
+  setInterval(refreshHistory, 500);
+  setInterval(refreshExplain, 700);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

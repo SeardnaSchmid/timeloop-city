@@ -47,7 +47,20 @@ free bed against its own and against staying homeless (`[housing]` formulas),
 so people move closer to work when it pays. Without a home, sleep recovers at
 half the rate.
 
-To see the map, write a viewer and open it in a browser (no server needed).
+To watch and steer the town live, start the engine as a local server and
+open the page it prints. The engine runs natively in its own thread for up to
+80 years (`--years N` to change); the page shows the map as it is right now,
+with play/pause, a speed control from 1 game minute per second up to as fast
+as possible (Space, arrow keys), a history chart to jump to any point (back
+via a checkpoint per year), restart with another seed, and for a clicked agent
+how it scores every action. Speed never changes the outcome: the state hash
+at a given game minute is the same however you got there.
+
+```bash
+cargo run --release -p timeloop-sim -- serve        # http://127.0.0.1:7878
+```
+
+To share a run as a single file instead, write a viewer and open it in a browser (no server needed).
 It plays back the whole run: agents coloured by action, houses with tenants
 and rent, a land-price layer, a history chart to jump around in, and details
 for any agent or building you click. The frame step adapts to the length of
