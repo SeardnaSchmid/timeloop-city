@@ -84,8 +84,10 @@ fn traits_change_work_hours_and_wealth() {
             work_d >= work_e + 60,
             "seed {seed}: diligent {work_d} min vs easygoing {work_e} min"
         );
+        // Comfort spending, pensions and inheritance even out savings, so
+        // the gap is smaller than the gap in work.
         assert!(
-            money_d > money_e * 3 / 2,
+            money_d > money_e * 5 / 4,
             "seed {seed}: diligent money {money_d} vs easygoing {money_e}"
         );
     }

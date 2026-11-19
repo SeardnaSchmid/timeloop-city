@@ -17,7 +17,9 @@ pub const MAX_TRAITS: usize = 16;
 /// The `market.*` variables describe the good a founder considers making
 /// (0 outside the founding rule); `firm.*` describe the firm the agent
 /// owns (0 without one), except `firm.capital`, the cost of founding one.
-pub const BASE_VARS: [&str; 26] = [
+/// `age` is in years; `in_education` and `retired` are 0 or 1 (always 0
+/// without a life course in the world file).
+pub const BASE_VARS: [&str; 29] = [
     "need.hunger",
     "need.fatigue",
     "need.safety",
@@ -44,6 +46,9 @@ pub const BASE_VARS: [&str; 26] = [
     "firm.cash",
     "firm.broke_days",
     "firm.age_days",
+    "age",
+    "in_education",
+    "retired",
 ];
 
 pub const MAX_VARS: usize = BASE_VARS.len() + MAX_TRAITS;
@@ -79,7 +84,10 @@ pub(crate) mod var {
     pub const FIRM_CASH: usize = 23;
     pub const FIRM_BROKE_DAYS: usize = 24;
     pub const FIRM_AGE_DAYS: usize = 25;
-    pub const TRAITS: usize = 26;
+    pub const AGE: usize = 26;
+    pub const IN_EDUCATION: usize = 27;
+    pub const RETIRED: usize = 28;
+    pub const TRAITS: usize = 29;
 }
 
 /// All variable names for the given traits, in table order.

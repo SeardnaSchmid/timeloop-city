@@ -14,7 +14,7 @@ name = "field"
 x = 3
 y = 4
 output = "grain"
-output_milli_per_worker_hour = 750
+output_milli_per_worker_hour = 1250
 slots = 22
 cash = 3000
 price = 15
@@ -28,7 +28,7 @@ x = 12
 y = 4
 output = "flour"
 input = { good = "grain", amount = 1 }
-output_milli_per_worker_hour = 1500
+output_milli_per_worker_hour = 2000
 slots = 12
 cash = 3000
 price = 25
@@ -43,7 +43,7 @@ x = 20
 y = 12
 output = "bread"
 input = { good = "flour", amount = 1 }
-output_milli_per_worker_hour = 1500
+output_milli_per_worker_hour = 2000
 slots = 12
 cash = 3000
 price = 35
@@ -122,6 +122,22 @@ name = "townsfolk"
 weight = 1
 traits = { greed = [0, 1000], work_life = [0, 1000] }
 
+# Life course. The town keeps 50 people: whoever dies is replaced the same
+# day by a child of someone aged 20-50 (70%) or a newcomer, entering at 16
+# with no money. Children inherit money and firm.
+[life]
+start_age = [16, 70]
+entry_age = 16
+education_end_age = 18
+retirement_age = 65
+lifespan = [70, 90]
+birth_percent = 70
+parent_age = [20, 50]
+# Share of every wage that pays for pensions and education allowances.
+pension_percent = 20
+# Share of an estate that goes to the town's welfare; children share the rest.
+inheritance_tax_percent = 50
+
 [needs.hunger]
 per_hour = 40
 # Interrupts the current action to go eat.
@@ -137,10 +153,10 @@ max_sleep_minutes = 600
 reserve_days = 5
 meals_per_day = 3
 
-# Comfort: 2% a day of savings beyond the safety reserve go to comforts the
+# Comfort: 4% a day of savings beyond the safety reserve go to comforts the
 # town provides (paid back out as welfare).
 [needs.comfort]
-spend_permille = 20
+spend_permille = 40
 
 [meal]
 relief = 300
@@ -181,7 +197,7 @@ score = "300 + trait.work_life / 4"
 # ran short lately and sells well above what it costs to make.
 [founding]
 capital = 300
-profit_tax_percent = 50
+profit_tax_percent = 75
 max_firms = 8
 when = "money >= firm.capital + 100 && market.newest_days >= 365 && market.price * 100 >= market.cost * 150"
 score = "(market.price - market.cost) * 1000 / max(market.cost, 1) + market.shortage + trait.greed / 2"

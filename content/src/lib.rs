@@ -10,8 +10,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use timeloop_core::{
     variable_names, ActionKind, ActionRule, Behaviour, BusinessConfig, Formula, FoundingRule,
-    HouseConfig, HousingConfig, HousingRule, MapConfig, MarketConfig, Population, Pos, RecipeInput,
-    WorldConfig, MAX_TRAITS, NEED_MAX,
+    HouseConfig, HousingConfig, HousingRule, LifeConfig, MapConfig, MarketConfig, Population, Pos,
+    RecipeInput, WorldConfig, MAX_TRAITS, NEED_MAX,
 };
 
 /// The bundled default world.
@@ -37,6 +37,9 @@ pub struct WorldFile {
     traits: TraitsSection,
     /// Agent groups; agents are split over them in ID order, by weight.
     population: Vec<PopulationSection>,
+    /// Ageing, education, retirement, death and new people. Without it
+    /// nobody ages.
+    life: Option<LifeSection>,
     needs: NeedsSection,
     meal: MealSection,
     work: WorkSection,
@@ -113,6 +116,33 @@ struct FoundingSection {
     score: String,
     /// The firm closes when this is > 0.
     close: String,
+}
+
+/// Ages are in years. The number of agents stays fixed: whoever dies is
+/// replaced the same day by a descendant of a living agent or a newcomer,
+/// entering at `entry_age` with no money. Money and firm go to the children
+/// (the firm to one, who runs it), without children to the town.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct LifeSection {
+    /// Ages of the first inhabitants, spread evenly.
+    start_age: [u32; 2],
+    entry_age: u32,
+    /// No job before this age.
+    education_end_age: u32,
+    /// No job from this age on.
+    retirement_age: u32,
+    /// Rolled once per person, evenly in this range.
+    lifespan: [u32; 2],
+    /// Chance in percent that a free place goes to a child of an agent aged
+    /// `parent_age` rather than to a newcomer.
+    birth_percent: u32,
+    parent_age: [u32; 2],
+    /// Percent of every wage paid into the pension fund, shared out daily
+    /// to everyone in education or retired.
+    pension_percent: u32,
+    /// Percent of an estate the town takes for welfare before the children share the rest.
+    inheritance_tax_percent: u32,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -514,6 +544,50 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
         "wander must satisfy 0 < min_minutes <= max_minutes",
     )?;
 
+    let life = match &f.life {
+        None => None,
+        Some(l) => {
+            let ordered = |[a, b]: [u32; 2]| a <= b;
+            check(ordered(l.start_age), "life.start_age must be [min, max]")?;
+            check(
+                ordered(l.lifespan) && l.lifespan[0] > 0,
+                "life.lifespan must be [min, max] > 0",
+            )?;
+            check(ordered(l.parent_age), "life.parent_age must be [min, max]")?;
+            check(
+                l.entry_age <= l.education_end_age && l.education_end_age <= l.retirement_age,
+                "life: entry_age <= education_end_age <= retirement_age",
+            )?;
+            check(
+                l.entry_age < l.lifespan[0],
+                "life.entry_age must be below the lifespan",
+            )?;
+            check(l.birth_percent <= 100, "life.birth_percent must be 0..=100")?;
+            check(
+                l.pension_percent <= 100,
+                "life.pension_percent must be 0..=100",
+            )?;
+            check(
+                l.inheritance_tax_percent <= 100,
+                "life.inheritance_tax_percent must be 0..=100",
+            )?;
+            Some(LifeConfig {
+                start_age_min: l.start_age[0],
+                start_age_max: l.start_age[1],
+                entry_age: l.entry_age,
+                education_end_age: l.education_end_age,
+                retirement_age: l.retirement_age,
+                lifespan_min: l.lifespan[0],
+                lifespan_max: l.lifespan[1],
+                birth_percent: l.birth_percent,
+                parent_age_min: l.parent_age[0],
+                parent_age_max: l.parent_age[1],
+                pension_percent: l.pension_percent,
+                inheritance_tax_percent: l.inheritance_tax_percent,
+            })
+        }
+    };
+
     Ok(WorldConfig {
         agents: f.world.agents,
         start_money: f.world.start_money,
@@ -533,6 +607,7 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
         traits,
         populations,
         behaviour,
+        life,
         hunger_per_hour: h.per_hour,
         hunger_critical: h.critical,
         fatigue_per_hour: fa.per_hour,
@@ -678,6 +753,8 @@ mod tests {
             ("food = \"bread\"", "food = \"cake\""),
             ("output = \"flour\"", "output = \"flower\""),
             ("capital = 300", "capital = 0"),
+            ("retirement_age = 65", "retirement_age = 10"),
+            ("lifespan = [70, 90]", "lifespan = [90, 70]"),
             ("close = \"", "close = \"firm.bank + "),
         ] {
             let text = DEFAULT_WORLD.replace(from, to);

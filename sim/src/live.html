@@ -249,6 +249,8 @@ function draw() {
   const cheapest = g => Math.min(...w.businesses.filter(b => b.open && b.good === g).map(b => b.price));
   $('town').innerHTML = [['employed', `${w.employed} / ${L.agents}`], ['homeless', w.homeless], ['hungry (≥800)', hungry],
     ['founded firms open', w.firms], ['money in the world', w.money],
+    ['mean age', w.meanAge], ['in education / retired', `${w.inEducation} / ${w.retired}`],
+    ['deaths / born / moved in', `${w.deaths} / ${w.births} / ${w.newcomers}`],
     ...goods.map(g => [`${g} price (lowest)`, isFinite(cheapest(g)) ? cheapest(g) : '–'])]
     .map(([k, v]) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`).join('');
   showInfo();
@@ -261,9 +263,12 @@ function showInfo() {
   if (selected.type === 'agent') {
     const a = agent(S, selected.id);
     html = `<h2>Agent a${selected.id}</h2>`;
-    rows = [['doing', L.actions[a.act]], ['hunger', a.hunger], ['money', a.money],
+    const k = selected.id, stage = ['in education', 'working age', 'retired'][w.stages[k]];
+    rows = [['age', `${w.ages[k]} (${stage})`], ['parent', w.parents[k] >= 0 ? 'a' + w.parents[k] : '–'],
+      ['generation in this slot', w.generations[k] + 1],
+      ['doing', L.actions[a.act]], ['hunger', a.hunger], ['money', a.money],
       ['home', a.home >= 0 ? L.houses[a.home].name : 'homeless'], ['job', a.job >= 0 ? w.businesses[a.job].name + (w.businesses[a.job].owner === selected.id ? ' (CEO)' : '') : 'unemployed'],
-      ...L.traits.map((t, n) => [t, L.agentTraits[selected.id][n]])];
+      ...L.traits.map((t, n) => [t, w.traits[selected.id][n]])];
   } else if (selected.type === 'house') {
     const h = L.houses[selected.id];
     html = `<h2>House · ${h.name}</h2>`;

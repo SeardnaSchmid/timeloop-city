@@ -340,6 +340,12 @@ fn csv_header(world: &World) -> String {
             "firms_founded",
             "firms_closed",
             "money_owners",
+            "deaths",
+            "births",
+            "newcomers",
+            "mean_age",
+            "in_education",
+            "retired",
         ]
         .map(String::from),
     );
@@ -380,6 +386,8 @@ fn csv_row(
     cols.push(s.firms_founded_total.to_string());
     cols.push(s.firms_closed_total.to_string());
     cols.push(s.money_owners.to_string());
+    cols.extend([s.deaths_total, s.births_total, s.arrivals_total].map(|v| v.to_string()));
+    cols.extend([s.mean_age, s.in_education, s.retired].map(|v| v.to_string()));
     cols.join(",")
 }
 

@@ -12,6 +12,7 @@ use crate::behaviour::{var, Allowed, Behaviour, Candidate, Explanation, Populati
 use crate::economy::{BusinessConfig, BusinessId, Economy, GoodId, MarketConfig};
 use crate::hash::{StateHash, StateHasher};
 use crate::housing::{HouseConfig, Housing, HousingConfig};
+use crate::life::{self, LifeConfig, Stage, DAYS_PER_YEAR};
 use crate::map::{Building, HouseId, Map, MapConfig, Pos};
 use crate::needs::{LazyNeed, NEED_MAX};
 use crate::queue::{Event, EventQueue};
@@ -55,6 +56,8 @@ pub struct WorldConfig {
     /// Agents are split over these in ID order, by weight.
     pub populations: Vec<Population>,
     pub behaviour: Behaviour,
+    /// Ageing, death and new people; `None`: everyone works forever.
+    pub life: Option<LifeConfig>,
 
     pub hunger_per_hour: u32,
     /// Hunger at which a running action is interrupted to go eat.
@@ -170,6 +173,18 @@ pub enum JobChange {
     Left,
     /// The firm closed.
     Closed,
+    Retired,
+    Died,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LifeChange {
+    /// Died at this age (years), leaving money and firm to this many children.
+    Died { age: u32, heirs: u32 },
+    /// A descendant of `parent` takes the free place.
+    Born { parent: u32 },
+    /// A newcomer to town takes the free place.
+    Arrived,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -210,6 +225,11 @@ pub enum LogEntry {
         agent: u32,
         business: BusinessId,
         change: FirmChange,
+    },
+    Life {
+        at: Minute,
+        agent: u32,
+        change: LifeChange,
     },
 }
 
@@ -259,6 +279,8 @@ impl fmt::Display for LogEntry {
                     JobChange::QuitUnpaid => "quit unpaid at",
                     JobChange::Left => "left",
                     JobChange::Closed => "lost the job, closed:",
+                    JobChange::Retired => "retired from",
+                    JobChange::Died => "died while working at",
                 };
                 write!(f, "{} a{agent} {what} b{business}", clock(at))
             }
@@ -285,6 +307,15 @@ impl fmt::Display for LogEntry {
                     write!(f, "{} a{agent} founded b{business} at {at_pos}", clock(at))
                 }
                 FirmChange::Closed => write!(f, "{} a{agent} closed b{business}", clock(at)),
+            },
+            LogEntry::Life { at, agent, change } => match change {
+                LifeChange::Died { age, heirs } => {
+                    write!(f, "{} a{agent} died aged {age}, {heirs} heirs", clock(at))
+                }
+                LifeChange::Born { parent } => {
+                    write!(f, "{} a{agent} is a child of a{parent}", clock(at))
+                }
+                LifeChange::Arrived => write!(f, "{} a{agent} moved to town", clock(at)),
             },
         }
     }
@@ -334,6 +365,13 @@ pub struct Stats {
     pub firms_closed_total: u64,
     /// Money held by firm owners (agents), summed.
     pub money_owners: i64,
+    pub deaths_total: u64,
+    pub births_total: u64,
+    pub arrivals_total: u64,
+    /// Mean age in years.
+    pub mean_age: u32,
+    pub in_education: u32,
+    pub retired: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -369,7 +407,22 @@ pub struct World {
     owns: Vec<BusinessId>,
     firms_founded: u64,
     firms_closed: u64,
+    /// Day of birth; negative for people older than the world.
+    birth_day: Vec<i64>,
+    /// Lifespan in days.
+    lifespan: Vec<u64>,
+    /// How many people have had this agent ID before.
+    generation: Vec<u32>,
+    /// Parent (agent ID and its generation then), or `NO_PARENT`.
+    parent: Vec<(u32, u32)>,
+    deaths: u64,
+    births: u64,
+    arrivals: u64,
+    /// Wage share collected for those in education or retired, paid out daily.
+    pension_fund: i64,
 }
+
+const NO_PARENT: (u32, u32) = (u32::MAX, u32::MAX);
 
 impl World {
     pub fn new(seed: u64, config: WorldConfig) -> Self {
@@ -404,6 +457,24 @@ impl World {
                 traits[agent * k + t] = lo + roll;
             }
         }
+        let mut birth_day = vec![0i64; n];
+        let mut lifespan = vec![u64::MAX; n];
+        if let Some(l) = &config.life {
+            for a in 0..n {
+                let y = DAYS_PER_YEAR;
+                let lo = l.start_age_min as u64 * y;
+                let age = life::roll(
+                    seed,
+                    a as u32,
+                    0,
+                    0,
+                    lo,
+                    (l.start_age_max as u64 * y).max(lo),
+                );
+                birth_day[a] = -(age as i64);
+                lifespan[a] = life::lifespan(l, seed, a as u32, 0, age);
+            }
+        }
         Self {
             seed,
             now: 0,
@@ -429,8 +500,45 @@ impl World {
             owns: vec![NO_EMPLOYER; n],
             firms_founded: 0,
             firms_closed: 0,
+            birth_day,
+            lifespan,
+            generation: vec![0; n],
+            parent: vec![NO_PARENT; n],
+            deaths: 0,
+            births: 0,
+            arrivals: 0,
+            pension_fund: 0,
             config,
         }
+    }
+
+    /// Age in days (0 without a life course).
+    pub fn age_days(&self, agent: u32) -> u64 {
+        (self.day() as i64 - self.birth_day[agent as usize]).max(0) as u64
+    }
+
+    pub fn stage(&self, agent: u32) -> Stage {
+        self.config
+            .life
+            .as_ref()
+            .map_or(Stage::Working, |l| l.stage(self.age_days(agent)))
+    }
+
+    /// The living parent, if this agent descends from one.
+    pub fn parent(&self, agent: u32) -> Option<u32> {
+        let (p, g) = self.parent[agent as usize];
+        (p != u32::MAX && self.generation[p as usize] == g).then_some(p)
+    }
+
+    /// People who have lived under this agent ID before the current one.
+    pub fn generation(&self, agent: u32) -> u32 {
+        self.generation[agent as usize]
+    }
+
+    fn children(&self, agent: u32) -> Vec<u32> {
+        (0..self.config.agents)
+            .filter(|&a| self.parent(a) == Some(agent))
+            .collect()
     }
 
     /// Replaces the decision rules while running (hot reload). Needs, money
@@ -588,7 +696,10 @@ impl World {
 
     /// Money held by agents and businesses together. Constant over time.
     pub fn money_supply(&self) -> i64 {
-        self.money.iter().sum::<i64>() + self.economy.total_cash() + self.housing.total_cash()
+        self.money.iter().sum::<i64>()
+            + self.economy.total_cash()
+            + self.housing.total_cash()
+            + self.pension_fund
     }
 
     pub fn stats(&self) -> Stats {
@@ -626,6 +737,24 @@ impl World {
             firms: self.owns.iter().filter(|&&b| b != NO_EMPLOYER).count() as u32,
             firms_founded_total: self.firms_founded,
             firms_closed_total: self.firms_closed,
+            deaths_total: self.deaths,
+            births_total: self.births,
+            arrivals_total: self.arrivals,
+            mean_age: if self.config.life.is_some() && self.config.agents > 0 {
+                ((0..self.config.agents)
+                    .map(|a| self.age_days(a))
+                    .sum::<u64>()
+                    / self.config.agents as u64
+                    / DAYS_PER_YEAR) as u32
+            } else {
+                0
+            },
+            in_education: (0..self.config.agents)
+                .filter(|&a| self.stage(a) == Stage::Education)
+                .count() as u32,
+            retired: (0..self.config.agents)
+                .filter(|&a| self.stage(a) == Stage::Retired)
+                .count() as u32,
             money_owners: (0..self.config.agents as usize)
                 .filter(|&i| self.owns[i] != NO_EMPLOYER)
                 .map(|i| self.money[i])
@@ -694,6 +823,7 @@ impl World {
             self.work_recent[i] = (3 * self.work_recent[i] + yesterday) / 4;
             self.work_at_day_start[i] = self.work_minutes[i];
         }
+        self.life_course(at, log);
         self.collect_rent(at, log);
         self.housing.adjust_rents();
         self.choose_homes(at, log);
@@ -915,7 +1045,9 @@ impl World {
     /// The job seeker with the least money is hired first (ties: lowest ID).
     fn hire_candidate(&self) -> Option<u32> {
         (0..self.config.agents)
-            .filter(|&a| self.employer[a as usize] == NO_EMPLOYER)
+            .filter(|&a| {
+                self.employer[a as usize] == NO_EMPLOYER && self.stage(a) == Stage::Working
+            })
             .min_by_key(|&a| (self.money[a as usize], a))
     }
 
@@ -1017,7 +1149,7 @@ impl World {
             .collect();
         let mut best: Option<(u32, BusinessId, i64)> = None;
         for agent in 0..self.config.agents {
-            if self.owns[agent as usize] != NO_EMPLOYER {
+            if self.owns[agent as usize] != NO_EMPLOYER || self.stage(agent) != Stage::Working {
                 continue;
             }
             let mut v = self.vars(agent, self.now);
@@ -1109,30 +1241,205 @@ impl World {
             })
             .collect();
         for b in closing {
-            for a in 0..self.config.agents {
-                if self.employer[a as usize] == b {
-                    self.leave_job(a, b, JobChange::Closed, at, log);
-                }
-            }
             let owner = self.economy.owner(b);
-            let cash = self.economy.close(b);
-            self.map.clear(self.economy.config(b).pos);
+            let cash = self.close_business(b, at, log);
             match owner {
-                Some(o) => {
-                    self.money[o as usize] += cash;
-                    self.owns[o as usize] = NO_EMPLOYER;
-                }
+                Some(o) => self.money[o as usize] += cash,
                 // Town cash goes to the needy with today's rent payout.
                 None => self.housing.add_cash(0, cash),
             }
-            self.firms_closed += 1;
-            log(LogEntry::Firm {
-                at,
-                agent: owner.unwrap_or(u32::MAX),
-                business: b,
-                change: FirmChange::Closed,
-            });
         }
+    }
+
+    /// Lets everyone go, clears the parcel and returns the cash.
+    fn close_business(&mut self, b: BusinessId, at: Minute, log: &mut impl FnMut(LogEntry)) -> i64 {
+        for a in 0..self.config.agents {
+            if self.employer[a as usize] == b {
+                self.leave_job(a, b, JobChange::Closed, at, log);
+            }
+        }
+        let owner = self.economy.owner(b);
+        let cash = self.economy.close(b);
+        self.map.clear(self.economy.config(b).pos);
+        if let Some(o) = owner {
+            self.owns[o as usize] = NO_EMPLOYER;
+        }
+        self.firms_closed += 1;
+        log(LogEntry::Firm {
+            at,
+            agent: owner.unwrap_or(u32::MAX),
+            business: b,
+            change: FirmChange::Closed,
+        });
+        cash
+    }
+
+    /// Daily: workers who reach retirement leave their job; whoever reached
+    /// the end of their life dies and someone new takes the place; the
+    /// pension fund is shared out among those in education or retired.
+    fn life_course(&mut self, at: Minute, log: &mut impl FnMut(LogEntry)) {
+        if self.config.life.is_none() {
+            return;
+        }
+        for agent in 0..self.config.agents {
+            let i = agent as usize;
+            if self.age_days(agent) >= self.lifespan[i] {
+                self.die(agent, at, log);
+                self.enter(agent, at, log);
+            } else if self.employer[i] != NO_EMPLOYER && self.stage(agent) != Stage::Working {
+                self.leave_job(agent, self.employer[i], JobChange::Retired, at, log);
+            }
+        }
+        let receivers: Vec<usize> = (0..self.config.agents)
+            .filter(|&a| self.stage(a) != Stage::Working)
+            .map(|a| a as usize)
+            .collect();
+        if !receivers.is_empty() {
+            let share = self.pension_fund / receivers.len() as i64;
+            for &i in &receivers {
+                self.money[i] += share;
+            }
+            self.pension_fund -= share * receivers.len() as i64;
+        }
+    }
+
+    /// Money goes, after the inheritance tax, to the children in equal shares, the firm to the first
+    /// child without one (who runs it if of working age); without children
+    /// both go to the town (the firm closes, its cash joins the welfare).
+    fn die(&mut self, agent: u32, at: Minute, log: &mut impl FnMut(LogEntry)) {
+        let i = agent as usize;
+        if self.employer[i] != NO_EMPLOYER {
+            self.leave_job(agent, self.employer[i], JobChange::Died, at, log);
+        }
+        if self.home[i] != NO_HOME {
+            self.set_home(agent, NO_HOME, HomeChange::MovedOut, at, log);
+        }
+        let heirs = self.children(agent);
+        let mut money = std::mem::take(&mut self.money[i]);
+        let tax_percent = self
+            .config
+            .life
+            .as_ref()
+            .map_or(0, |l| l.inheritance_tax_percent);
+        let tax = money.max(0) * tax_percent as i64 / 100;
+        self.housing.add_cash(0, tax);
+        money -= tax;
+        if heirs.is_empty() {
+            self.housing.add_cash(0, money);
+        } else {
+            let share = money / heirs.len() as i64;
+            for &h in &heirs {
+                self.money[h as usize] += share;
+            }
+            self.money[heirs[0] as usize] += money - share * heirs.len() as i64;
+        }
+        let b = std::mem::replace(&mut self.owns[i], NO_EMPLOYER);
+        if b != NO_EMPLOYER {
+            match heirs
+                .iter()
+                .copied()
+                .find(|&h| self.owns[h as usize] == NO_EMPLOYER)
+            {
+                Some(h) => {
+                    self.economy.set_owner(b, h);
+                    self.owns[h as usize] = b;
+                    if self.stage(h) == Stage::Working {
+                        let job = self.employer[h as usize];
+                        if job != NO_EMPLOYER {
+                            self.leave_job(h, job, JobChange::Left, at, log);
+                        }
+                        self.hire(h, b, at, log);
+                    }
+                }
+                None => {
+                    let cash = self.close_business(b, at, log);
+                    self.housing.add_cash(0, cash);
+                }
+            }
+        }
+        self.deaths += 1;
+        log(LogEntry::Life {
+            at,
+            agent,
+            change: LifeChange::Died {
+                age: (self.age_days(agent) / DAYS_PER_YEAR) as u32,
+                heirs: heirs.len() as u32,
+            },
+        });
+    }
+
+    /// A new person in a free slot: a child of a living agent of parent age
+    /// (inheriting its population and traits close to its own) or a
+    /// newcomer of the slot's population. Starts at `entry_age` with no money.
+    fn enter(&mut self, agent: u32, at: Minute, log: &mut impl FnMut(LogEntry)) {
+        let Some(l) = self.config.life.clone() else {
+            return;
+        };
+        let i = agent as usize;
+        self.generation[i] += 1;
+        let gen = self.generation[i];
+        let seed = self.seed;
+        let y = DAYS_PER_YEAR;
+        let parents: Vec<u32> = (0..self.config.agents)
+            .filter(|&a| {
+                let years = self.age_days(a) / y;
+                a != agent && (l.parent_age_min as u64..=l.parent_age_max as u64).contains(&years)
+            })
+            .collect();
+        let born =
+            !parents.is_empty() && life::roll(seed, agent, gen, 3, 0, 99) < l.birth_percent as u64;
+        let k = self.config.traits.len();
+        let parent = if born {
+            let p = parents[life::roll(seed, agent, gen, 4, 0, parents.len() as u64 - 1) as usize];
+            self.population[i] = self.population[p as usize];
+            let pop = &self.config.populations[self.population[i] as usize];
+            for t in 0..k {
+                // Close to the parent: +-100, kept in the population's range.
+                let pv = self.traits[p as usize * k + t] as i64;
+                let d = life::roll(seed, agent, gen, 16 + t as u64, 0, 200) as i64 - 100;
+                let (lo, hi) = pop.traits.get(t).copied().unwrap_or((0, NEED_MAX));
+                self.traits[i * k + t] = (pv + d).clamp(lo as i64, hi as i64) as u32;
+            }
+            self.parent[i] = (p, self.generation[p as usize]);
+            self.pos[i] = self
+                .home(p)
+                .map_or(self.pos[p as usize], |h| self.housing.config(h).pos);
+            self.births += 1;
+            Some(p)
+        } else {
+            let pop = self.config.populations[self.population[i] as usize].clone();
+            for (t, &(lo, hi)) in pop.traits.iter().enumerate() {
+                self.traits[i * k + t] =
+                    life::roll(seed, agent, gen, 16 + t as u64, lo as u64, hi as u64) as u32;
+            }
+            self.parent[i] = NO_PARENT;
+            self.pos[i] = self.config.map.center();
+            self.arrivals += 1;
+            None
+        };
+        let now = self.now;
+        let entry = l.entry_age as u64 * y;
+        self.birth_day[i] = self.day() as i64 - entry as i64;
+        self.lifespan[i] = life::lifespan(&l, seed, agent, gen, entry);
+        self.hunger[i] = LazyNeed::new(0, now);
+        self.fatigue[i] = LazyNeed::new(0, now);
+        self.action[i] = Action {
+            started: now,
+            ends: now,
+            target: self.pos[i],
+            ..Action::IDLE
+        };
+        self.work_minutes[i] = 0;
+        self.work_at_day_start[i] = 0;
+        self.work_recent[i] = 0;
+        log(LogEntry::Life {
+            at,
+            agent,
+            change: match parent {
+                Some(parent) => LifeChange::Born { parent },
+                None => LifeChange::Arrived,
+            },
+        });
     }
 
     fn leave_job(
@@ -1219,7 +1526,13 @@ impl World {
                 self.economy.produce(b, elapsed);
                 let owed = self.economy.wage(b) * elapsed as i64 / 60;
                 let paid = self.economy.pay(b, owed);
-                self.money[i] += paid;
+                let pension = self
+                    .config
+                    .life
+                    .as_ref()
+                    .map_or(0, |l| paid * l.pension_percent as i64 / 100);
+                self.pension_fund += pension;
+                self.money[i] += paid - pension;
                 if paid < owed && self.economy.workers(b) > CORE_CREW && self.owns[i] != b {
                     self.leave_job(agent, b, JobChange::QuitUnpaid, now, log);
                 }
@@ -1289,6 +1602,12 @@ impl World {
         }
         if self.owns[i] != NO_EMPLOYER {
             self.firm_vars(self.owns[i], now, &mut v);
+        }
+        if self.config.life.is_some() {
+            v[var::AGE] = (self.age_days(agent) / DAYS_PER_YEAR) as i64;
+            let stage = self.stage(agent);
+            v[var::IN_EDUCATION] = (stage == Stage::Education) as i64;
+            v[var::RETIRED] = (stage == Stage::Retired) as i64;
         }
         for (t, &value) in self.traits(agent).iter().enumerate() {
             v[var::TRAITS + t] = value as i64;
@@ -1483,6 +1802,17 @@ impl StateHash for World {
         h.write_u32_slice(&self.owns);
         h.write_u64(self.firms_founded);
         h.write_u64(self.firms_closed);
+        h.write_i64_slice(&self.birth_day);
+        self.lifespan.iter().for_each(|&l| h.write_u64(l));
+        h.write_u32_slice(&self.generation);
+        for &(p, g) in &self.parent {
+            h.write_u32(p);
+            h.write_u32(g);
+        }
+        h.write_u64(self.deaths);
+        h.write_u64(self.births);
+        h.write_u64(self.arrivals);
+        h.write_i64(self.pension_fund);
     }
 }
 
@@ -1605,6 +1935,7 @@ pub(crate) mod tests {
                 traits: vec![(0, 1000), (0, 1000)],
             }],
             behaviour: behaviour(&RULES),
+            life: None,
             hunger_per_hour: 40,
             hunger_critical: 800,
             fatigue_per_hour: 40,
@@ -2198,5 +2529,129 @@ mod firm_tests {
         w.pay_dividends();
         assert_eq!(w.money(owner) - before, surplus * 75 / 100);
         assert_eq!(w.money_supply(), supply);
+    }
+}
+
+#[cfg(test)]
+mod life_tests {
+    use super::tests::config;
+    use super::*;
+    use crate::economy::tests::chain;
+
+    fn life_config() -> WorldConfig {
+        let mut c = config();
+        c.life = Some(LifeConfig {
+            start_age_min: 16,
+            start_age_max: 70,
+            entry_age: 16,
+            education_end_age: 18,
+            retirement_age: 65,
+            lifespan_min: 70,
+            lifespan_max: 90,
+            birth_percent: 100,
+            parent_age_min: 20,
+            parent_age_max: 50,
+            pension_percent: 20,
+            inheritance_tax_percent: 50,
+        });
+        c
+    }
+
+    #[test]
+    fn only_working_age_people_have_jobs() {
+        let mut w = World::new(1, life_config());
+        let supply = w.money_supply();
+        for _ in 0..60 {
+            w.run_days(1);
+            for a in 0..w.agent_count() {
+                if w.stage(a) != Stage::Working {
+                    assert_eq!(
+                        w.employer(a),
+                        None,
+                        "a{a} works at age {}",
+                        w.age_days(a) / 365
+                    );
+                }
+            }
+            assert_eq!(w.money_supply(), supply, "pension fund keeps money");
+        }
+        let s = w.stats();
+        assert!(s.retired > 0 && s.retired < 25, "{} retired", s.retired);
+    }
+
+    #[test]
+    fn children_inherit_money_after_tax_and_the_firm() {
+        let mut w = World::new(1, life_config());
+        w.run_days(1);
+        let (parent, child) = (3, 4);
+        w.parent[child as usize] = (parent, w.generation[parent as usize]);
+        w.money[parent as usize] = 1000;
+        let b = w.economy.open_business(chain()[2].clone(), parent, 1);
+        w.owns[parent as usize] = b;
+        let before = w.money(child);
+        let supply = w.money_supply();
+        let now = w.now;
+        w.die(parent, now, &mut |_| {});
+        assert_eq!(w.money(child) - before, 500);
+        assert_eq!(w.economy.owner(b), Some(child));
+        assert_eq!(w.owned_firm(child), Some(b));
+        assert_eq!(w.parent(child), Some(parent), "slot not refilled yet");
+        w.enter(parent, now, &mut |_| {});
+        assert_eq!(w.parent(child), None, "the parent is gone");
+        assert_eq!(w.money(parent), 0);
+        assert_eq!(w.age_days(parent), 16 * DAYS_PER_YEAR);
+        assert_eq!(w.generation(parent), 1);
+        assert_eq!(w.money_supply(), supply);
+    }
+
+    #[test]
+    fn without_children_estate_and_firm_go_to_the_town() {
+        let mut w = World::new(2, life_config());
+        w.run_days(1);
+        let a = 5;
+        let b = w.economy.open_business(chain()[2].clone(), a, 1);
+        w.economy.add_cash(b, 300);
+        w.owns[a as usize] = b;
+        let supply = w.money_supply();
+        let now = w.now;
+        w.die(a, now, &mut |_| {});
+        assert!(!w.economy.is_open(b));
+        assert_eq!(w.money(a), 0);
+        assert_eq!(w.money_supply(), supply);
+    }
+
+    #[test]
+    fn the_dead_are_replaced_by_children_or_newcomers() {
+        let mut w = World::new(3, life_config());
+        let mut died = 0;
+        for _ in 0..(10 * DAYS_PER_YEAR) {
+            let until = w.now + MINUTES_PER_DAY;
+            w.run_until(until, &mut |e| {
+                if let LogEntry::Life {
+                    change: LifeChange::Died { .. },
+                    ..
+                } = e
+                {
+                    died += 1;
+                }
+            });
+        }
+        let s = w.stats();
+        assert!(died > 0);
+        assert_eq!(s.deaths_total, died);
+        assert_eq!(s.births_total + s.arrivals_total, died);
+        assert!(s.births_total > 0, "birth_percent is 100");
+        let children = (0..w.agent_count())
+            .filter(|&a| w.parent(a).is_some())
+            .count();
+        assert!(children > 0);
+    }
+
+    #[test]
+    fn without_a_life_course_nobody_ages() {
+        let mut w = World::new(1, config());
+        w.run_days(400);
+        assert_eq!(w.stats().deaths_total, 0);
+        assert!((0..w.agent_count()).all(|a| w.stage(a) == Stage::Working));
     }
 }

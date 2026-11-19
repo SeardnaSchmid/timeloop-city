@@ -23,7 +23,8 @@ cargo run --release -p timeloop-sim -- --agents 1 --days 2 --log
 Add `--stats FILE` to write one CSV row per day (money of agents, businesses and in total, prices, wages, cash,
 staff, stock, employment, hunger, meals, work hours, money Gini, share of
 time spent starving, rent and tenants per house, homeless, mean commute,
-founded firms open / founded / closed, money held by firm owners):
+founded firms open / founded / closed, money held by firm owners, deaths,
+births, newcomers, mean age, people in education and retired):
 
 ```bash
 cargo run --release -p timeloop-sim -- --days 3650 --stats stats.csv --quiet
@@ -59,9 +60,19 @@ home and runs the firm as CEO (works there, is never laid off, takes what the
 till can pay). The firm's surplus goes to the owner after a profit tax that
 joins the welfare. Any business that has been broke for a month closes (its
 cash to the owner, its stock lost); a broke business may sell below cost.
-Above safety, agents spend 2% a day of their savings beyond the reserve on
+Above safety, agents spend 4% a day of their savings beyond the reserve on
 comforts (`[needs.comfort]`); without that, owners end up holding all the
 money and demand dies.
+
+People age (`[life]`): the first inhabitants are 16-70, everyone's lifespan
+is rolled between 70 and 90. Until 18 they are in education, from 65 retired;
+neither takes a job. A fifth of every wage goes into a pension fund that is
+shared out daily among them. Whoever dies leaves money (after 50%
+inheritance tax) and firm to their children; without children both go to the
+town. The same day someone new takes the free place: mostly a child of a
+living agent aged 20-50 (population and traits close to the parent's),
+otherwise a newcomer, entering at 16 with no money. Childhood is not
+simulated. A business stores at most four times its output target.
 
 To watch and steer the town live, start the engine as a local server and
 open the page it prints. The engine runs natively in its own thread for up to
@@ -82,7 +93,7 @@ and rent, a land-price layer, a history chart to jump around in, and details
 for any agent or building you click. The frame step adapts to the length of
 the run (about 4000 frames; daily or longer steps show noon); `--html-step`
 sets it, `--html-days N` limits the viewer to the last N days. A whole life
-of 80 years takes about 8 seconds:
+of 80 years takes about 10 seconds:
 
 ```bash
 cargo run --release -p timeloop-sim -- --years 80 --html map.html --quiet
@@ -97,8 +108,10 @@ steps. `sim/tests/bread_town.rs` checks that ten years stay fed and balanced;
 `sim/tests/traits.rs` checks that diligent and easygoing populations work
 different hours and end up with different wealth; `sim/tests/city.rs` checks
 that vacancy settles, rents stay bounded and commutes get shorter;
-`sim/tests/firms.rs` checks that firms get founded and survive, the town eats
-better than without them and owners hold less than half the money.
+`sim/tests/firms.rs` checks over six seeds of 20 years that firms get founded
+and survive, the town stays fed and owners hold less than half the money;
+`sim/tests/life.rs` runs 80 years and checks deaths, births, newcomers and
+the age structure.
 
 `content/data/world.toml` points at its schema, so editors with TOML schema
 support (Taplo / Even Better TOML) autocomplete and validate it. After changing

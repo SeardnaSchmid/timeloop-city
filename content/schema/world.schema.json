@@ -42,6 +42,17 @@
     "housing": {
       "$ref": "#/$defs/HousingSection"
     },
+    "life": {
+      "description": "Ageing, education, retirement, death and new people. Without it\nnobody ages.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LifeSection"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "map": {
       "$ref": "#/$defs/MapSection"
     },
@@ -433,6 +444,91 @@
       "required": [
         "good",
         "amount"
+      ]
+    },
+    "LifeSection": {
+      "description": "Ages are in years. The number of agents stays fixed: whoever dies is\nreplaced the same day by a descendant of a living agent or a newcomer,\nentering at `entry_age` with no money. Money and firm go to the children\n(the firm to one, who runs it), without children to the town.",
+      "type": "object",
+      "properties": {
+        "birth_percent": {
+          "description": "Chance in percent that a free place goes to a child of an agent aged\n`parent_age` rather than to a newcomer.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "education_end_age": {
+          "description": "No job before this age.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "entry_age": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "inheritance_tax_percent": {
+          "description": "Percent of an estate the town takes for welfare before the children share the rest.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "lifespan": {
+          "description": "Rolled once per person, evenly in this range.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "maxItems": 2,
+          "minItems": 2
+        },
+        "parent_age": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "maxItems": 2,
+          "minItems": 2
+        },
+        "pension_percent": {
+          "description": "Percent of every wage paid into the pension fund, shared out daily\nto everyone in education or retired.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "retirement_age": {
+          "description": "No job from this age on.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "start_age": {
+          "description": "Ages of the first inhabitants, spread evenly.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "maxItems": 2,
+          "minItems": 2
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "start_age",
+        "entry_age",
+        "education_end_age",
+        "retirement_age",
+        "lifespan",
+        "birth_percent",
+        "parent_age",
+        "pension_percent",
+        "inheritance_tax_percent"
       ]
     },
     "MapSection": {

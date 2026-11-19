@@ -15,6 +15,10 @@ pub type BusinessId = u32;
 
 const NO_OWNER: u32 = u32::MAX;
 
+/// A business stores at most this many times its output target; labour
+/// beyond that is lost.
+const STORAGE_TARGETS: u32 = 4;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RecipeInput {
     pub good: GoodId,
@@ -157,6 +161,11 @@ impl Economy {
         std::mem::take(&mut self.cash[i])
     }
 
+    /// Hands the business to a new owner (inheritance).
+    pub fn set_owner(&mut self, b: BusinessId, owner: u32) {
+        self.owner[b as usize] = owner;
+    }
+
     pub fn is_open(&self, b: BusinessId) -> bool {
         self.open[b as usize]
     }
@@ -269,16 +278,19 @@ impl Economy {
         self.workers[b as usize] -= 1;
     }
 
-    /// Turns `minutes` of one worker's labour into output, limited by input stock.
+    /// Turns `minutes` of one worker's labour into output, limited by input
+    /// stock and storage room.
     pub fn produce(&mut self, b: BusinessId, minutes: u64) -> u32 {
         let c = self.config(b).clone();
         let i = b as usize;
         let p = self.progress_milli[i] + minutes * c.output_milli_per_worker_hour as u64 / 60;
         let possible = (p / 1000) as u32;
+        let room = (STORAGE_TARGETS * c.output_target).saturating_sub(self.stock(b, c.output));
         let units = match c.input {
             Some(input) => possible.min(self.stock(b, input.good) / input.amount),
             None => possible,
-        };
+        }
+        .min(room);
         // Labour that found no input is lost.
         self.progress_milli[i] = if units < possible {
             0
@@ -504,6 +516,16 @@ pub(crate) mod tests {
         assert_eq!(e.produce(1, 60), 2);
         assert_eq!(e.stock(1, GRAIN), 0);
         assert_eq!(e.stock(1, FLOUR), 2);
+    }
+
+    #[test]
+    fn a_full_store_stops_production() {
+        let mut e = Economy::new(3, chain(), market());
+        *e.stock_mut(0, GRAIN) = 239;
+        // 1.5 grain/h for 10 h would be 15, but the store holds 4 x 60.
+        assert_eq!(e.produce(0, 600), 1);
+        assert_eq!(e.stock(0, GRAIN), 240);
+        assert_eq!(e.produce(0, 600), 0);
     }
 
     #[test]

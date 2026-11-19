@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 
 use timeloop_core::{Allowed, Minute, StateHash, World, WorldConfig, MINUTES_PER_DAY};
 
-pub const DAYS_PER_YEAR: u64 = 365;
+pub const DAYS_PER_YEAR: u64 = timeloop_core::DAYS_PER_YEAR;
 pub const YEAR: Minute = DAYS_PER_YEAR * MINUTES_PER_DAY;
 /// Values per day in [`Live::history`].
 pub const HISTORY_FIELDS: usize = 6;
@@ -212,8 +212,31 @@ impl Live {
         }
         let _ = write!(
             t,
-            "],\"rent\":{:?},\"tenants\":{:?},\"firms\":{},\"land\":[",
-            s.rents, s.tenants, s.firms
+            "],\"rent\":{:?},\"tenants\":{:?},\"firms\":{},\"deaths\":{},\"births\":{},\
+             \"newcomers\":{},\"meanAge\":{},\"inEducation\":{},\"retired\":{},",
+            s.rents,
+            s.tenants,
+            s.firms,
+            s.deaths_total,
+            s.births_total,
+            s.arrivals_total,
+            s.mean_age,
+            s.in_education,
+            s.retired
+        );
+        // Per agent: age in years, life stage, parent (-1: none), generation.
+        let ages: Vec<u64> = (0..w.agent_count())
+            .map(|a| w.age_days(a) / DAYS_PER_YEAR)
+            .collect();
+        let stages: Vec<u8> = (0..w.agent_count()).map(|a| w.stage(a) as u8).collect();
+        let parents: Vec<i64> = (0..w.agent_count())
+            .map(|a| w.parent(a).map_or(-1, |p| p as i64))
+            .collect();
+        let gens: Vec<u32> = (0..w.agent_count()).map(|a| w.generation(a)).collect();
+        let traits: Vec<&[u32]> = (0..w.agent_count()).map(|a| w.traits(a)).collect();
+        let _ = write!(
+            t,
+            "\"ages\":{ages:?},\"stages\":{stages:?},\"parents\":{parents:?},\"generations\":{gens:?},\"traits\":{traits:?},\"land\":["
         );
         let m = &w.config().map;
         for y in 0..m.height {
