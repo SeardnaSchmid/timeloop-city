@@ -264,7 +264,18 @@ fn run(args: &Args, mut world: World) -> io::Result<()> {
             let agent_minutes = (world.agent_count() as u64 * MINUTES_PER_DAY).max(1);
             let starving = (s.starving_minutes_total - starving_before) * 1000 / agent_minutes;
             let meals = s.meals_total - meals_before;
-            writeln!(f, "{}", csv_row(day, &s, meals, work_hours, starving))?;
+            writeln!(
+                f,
+                "{}",
+                csv_row(
+                    day,
+                    &s,
+                    world.config().businesses.len(),
+                    meals,
+                    work_hours,
+                    starving
+                )
+            )?;
             meals_before = s.meals_total;
             work_before = s.work_minutes_total;
             starving_before = s.starving_minutes_total;
@@ -320,21 +331,39 @@ fn csv_header(world: &World) -> String {
             .iter()
             .map(|h| format!("tenants_{}", h.name.replace(' ', "_"))),
     );
-    cols.extend(["homeless", "commute_centi"].map(String::from));
+    cols.extend(
+        [
+            "homeless",
+            "commute_centi",
+            "firms",
+            "firms_founded",
+            "firms_closed",
+            "money_owners",
+        ]
+        .map(String::from),
+    );
     cols.join(",")
 }
 
 /// One CSV row; `meals`, `work_hours` and `starving_permille` are for this day.
-fn csv_row(day: u64, s: &Stats, meals: u64, work_hours: u64, starving_permille: u64) -> String {
+/// Per-business columns cover the town's businesses; founded firms are summed up.
+fn csv_row(
+    day: u64,
+    s: &Stats,
+    town: usize,
+    meals: u64,
+    work_hours: u64,
+    starving_permille: u64,
+) -> String {
     let mut cols = vec![
         day.to_string(),
         s.money_agents.to_string(),
         s.money_businesses.to_string(),
     ];
-    cols.extend(s.prices.iter().map(i64::to_string));
-    cols.extend(s.wages.iter().map(i64::to_string));
-    cols.extend(s.cash.iter().map(i64::to_string));
-    cols.extend(s.workers.iter().map(u32::to_string));
+    cols.extend(s.prices[..town].iter().map(i64::to_string));
+    cols.extend(s.wages[..town].iter().map(i64::to_string));
+    cols.extend(s.cash[..town].iter().map(i64::to_string));
+    cols.extend(s.workers[..town].iter().map(u32::to_string));
     cols.extend(s.stock.iter().map(u32::to_string));
     cols.extend([s.employed, s.unemployed, s.hungry].map(|v| v.to_string()));
     cols.push(meals.to_string());
@@ -345,6 +374,10 @@ fn csv_row(day: u64, s: &Stats, meals: u64, work_hours: u64, starving_permille: 
     cols.extend(s.tenants.iter().map(u32::to_string));
     cols.push(s.homeless.to_string());
     cols.push(s.commute_centi.to_string());
+    cols.push(s.firms.to_string());
+    cols.push(s.firms_founded_total.to_string());
+    cols.push(s.firms_closed_total.to_string());
+    cols.push(s.money_owners.to_string());
     cols.join(",")
 }
 

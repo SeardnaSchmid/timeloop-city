@@ -1,5 +1,8 @@
 //! Businesses, goods and the daily market.
 //!
+//! The businesses of the world file belong to the town. Agents found more
+//! (firms) and own them; a closed firm keeps its ID until a new firm reuses it.
+//!
 //! The money supply is closed: money only moves between agents and business
 //! cash, it is never created or destroyed. Goods enter the world through
 //! recipes without inputs (the field) and leave it when eaten.
@@ -9,6 +12,8 @@ use crate::map::Pos;
 
 pub type GoodId = u32;
 pub type BusinessId = u32;
+
+const NO_OWNER: u32 = u32::MAX;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RecipeInput {
@@ -63,6 +68,15 @@ pub struct Economy {
     sold_today: Vec<u32>,
     /// Price paid per unit of input at the last restock; part of the cost floor.
     last_input_price: Vec<i64>,
+    /// Agent who owns the business; `NO_OWNER` for the town.
+    owner: Vec<u32>,
+    open: Vec<bool>,
+    /// Day the business opened.
+    opened_day: Vec<u64>,
+    /// Days in a row the business started without a day's payroll in cash.
+    broke_days: Vec<u32>,
+    /// Per good: how often it ran short lately, 0-1000 (smoothed daily).
+    short_recent: Vec<u32>,
 }
 
 impl Economy {
@@ -82,8 +96,103 @@ impl Economy {
             workers: vec![0; n],
             sold_today: vec![0; n],
             last_input_price: vec![0; n],
+            owner: vec![NO_OWNER; n],
+            open: vec![true; n],
+            opened_day: vec![0; n],
+            broke_days: vec![0; n],
+            short_recent: vec![0; goods],
             config,
             market,
+        }
+    }
+
+    /// Opens a business owned by `owner`, reusing the lowest closed ID.
+    /// Its cash, price, wage and stock come from `config`.
+    pub fn open_business(&mut self, config: BusinessConfig, owner: u32, day: u64) -> BusinessId {
+        let b = match self.open.iter().position(|&o| !o) {
+            Some(b) => b,
+            None => {
+                self.config.push(config.clone());
+                self.cash.push(0);
+                self.price.push(0);
+                self.wage.push(0);
+                self.stock.extend(std::iter::repeat_n(0, self.goods));
+                self.progress_milli.push(0);
+                self.workers.push(0);
+                self.sold_today.push(0);
+                self.last_input_price.push(0);
+                self.owner.push(NO_OWNER);
+                self.open.push(false);
+                self.opened_day.push(0);
+                self.broke_days.push(0);
+                self.config.len() - 1
+            }
+        };
+        let g = self.goods;
+        self.stock[b * g..(b + 1) * g].fill(0);
+        self.stock[b * g + config.output as usize] = config.start_stock;
+        self.cash[b] = config.start_cash;
+        self.price[b] = config.start_price;
+        self.wage[b] = config.start_wage;
+        self.progress_milli[b] = 0;
+        self.sold_today[b] = 0;
+        self.last_input_price[b] = 0;
+        self.owner[b] = owner;
+        self.open[b] = true;
+        self.opened_day[b] = day;
+        self.broke_days[b] = 0;
+        self.config[b] = config;
+        b as BusinessId
+    }
+
+    /// Closes a business without workers: its stock is gone, its cash is
+    /// returned (to go to the owner).
+    pub fn close(&mut self, b: BusinessId) -> i64 {
+        let i = b as usize;
+        assert_eq!(self.workers[i], 0, "close needs an empty crew");
+        let g = self.goods;
+        self.stock[i * g..(i + 1) * g].fill(0);
+        self.open[i] = false;
+        self.owner[i] = NO_OWNER;
+        std::mem::take(&mut self.cash[i])
+    }
+
+    pub fn is_open(&self, b: BusinessId) -> bool {
+        self.open[b as usize]
+    }
+
+    pub fn owner(&self, b: BusinessId) -> Option<u32> {
+        Some(self.owner[b as usize]).filter(|&o| o != NO_OWNER)
+    }
+
+    pub fn opened_day(&self, b: BusinessId) -> u64 {
+        self.opened_day[b as usize]
+    }
+
+    pub fn broke_days(&self, b: BusinessId) -> u32 {
+        self.broke_days[b as usize]
+    }
+
+    /// How often `good` ran short lately, 0-1000.
+    pub fn shortage(&self, good: GoodId) -> u32 {
+        self.short_recent[good as usize]
+    }
+
+    /// Open businesses making `good`.
+    pub fn producers(&self, good: GoodId) -> impl Iterator<Item = BusinessId> + '_ {
+        (0..self.len()).filter(move |&b| self.open[b as usize] && self.config(b).output == good)
+    }
+
+    /// Once a day: counts days without a day's payroll in cash.
+    pub fn update_broke_days(&mut self, work_hours: i64) {
+        for b in 0..self.len() {
+            let i = b as usize;
+            let payroll = self.payroll_per_day(b, self.workers[i].max(1), work_hours);
+            self.broke_days[i] = if self.open[i] && self.cash[i] < payroll {
+                self.broke_days[i] + 1
+            } else {
+                0
+            };
         }
     }
 
@@ -134,7 +243,9 @@ impl Economy {
     /// Cheapest business selling `good` that has it in stock; ties go to the lower ID.
     pub fn cheapest_seller(&self, good: GoodId) -> Option<BusinessId> {
         (0..self.len())
-            .filter(|&b| self.config(b).output == good && self.stock(b, good) > 0)
+            .filter(|&b| {
+                self.is_open(b) && self.config(b).output == good && self.stock(b, good) > 0
+            })
             .min_by_key(|&b| (self.price(b), b))
     }
 
@@ -220,7 +331,7 @@ impl Economy {
     /// If payroll is then short, the daily layoffs shrink the workforce.
     pub fn restock_inputs(&mut self, work_hours: i64) {
         for buyer in 0..self.len() {
-            let Some(input) = self.config(buyer).input else {
+            let Some(input) = self.config(buyer).input.filter(|_| self.is_open(buyer)) else {
                 continue;
             };
             let mut want = self
@@ -253,20 +364,36 @@ impl Economy {
     ///
     /// Price rises only when goods actually sold and stock ran low (excess
     /// demand); it falls on a glut or when nothing sold at all. Empty shelves
-    /// with no buyers leave it unchanged. It never drops below unit cost.
+    /// with no buyers leave it unchanged. It never drops below unit cost,
+    /// unless the business is broke.
+    /// A good counts as short today when one of its sellers raised its price.
     pub fn adjust_prices(&mut self) {
         let m = self.market.clone();
+        let mut short = vec![false; self.goods];
         for b in 0..self.len() {
             let i = b as usize;
+            let sold = std::mem::take(&mut self.sold_today[i]);
+            if !self.open[i] {
+                continue;
+            }
             let c = &self.config[i];
             let stock = self.stock(b, c.output);
-            let sold = std::mem::take(&mut self.sold_today[i]);
             if stock > 2 * c.output_target || (sold == 0 && stock > 0) {
                 self.price[i] -= m.price_step;
             } else if stock < c.output_target && sold > 0 {
                 self.price[i] += m.price_step;
+                short[c.output as usize] = true;
             }
-            self.price[i] = self.price[i].max(m.price_min).max(self.unit_cost(b));
+            // A broke business sells below cost to raise cash.
+            let floor = if self.broke_days[i] > 0 {
+                0
+            } else {
+                self.unit_cost(b)
+            };
+            self.price[i] = self.price[i].max(m.price_min).max(floor);
+        }
+        for (r, s) in self.short_recent.iter_mut().zip(short) {
+            *r = (7 * *r + 1000 * s as u32) / 8;
         }
     }
 
@@ -282,6 +409,9 @@ impl Economy {
         let m = self.market.clone();
         for b in 0..self.len() {
             let i = b as usize;
+            if !self.open[i] {
+                continue;
+            }
             let c = &self.config[i];
             let short_handed =
                 self.workers[i] < c.slots && self.stock(b, c.output) < c.output_target;
@@ -314,6 +444,15 @@ impl Economy {
         h.write_u32_slice(&self.sold_today);
         h.write_i64_slice(&self.last_input_price);
         self.progress_milli.iter().for_each(|&p| h.write_u64(p));
+        h.write_u32_slice(&self.owner);
+        self.open.iter().for_each(|&o| h.write_bytes(&[o as u8]));
+        self.opened_day.iter().for_each(|&d| h.write_u64(d));
+        h.write_u32_slice(&self.broke_days);
+        h.write_u32_slice(&self.short_recent);
+        for c in &self.config {
+            c.pos.hash_into(h);
+            h.write_u32(c.output);
+        }
     }
 }
 
@@ -434,6 +573,42 @@ pub(crate) mod tests {
         // Flour 1 + labour ceil(wage 1 x 1000 / 3000) = 1 -> 2.
         assert_eq!(e.unit_cost(2), 2);
         assert_eq!(e.price(2), 2);
+    }
+
+    #[test]
+    fn closed_ids_are_reused_and_closing_returns_cash() {
+        let mut e = Economy::new(3, chain(), market());
+        let mut c = chain()[2].clone();
+        c.start_cash = 500;
+        let b = e.open_business(c.clone(), 7, 3);
+        assert_eq!(
+            (b, e.owner(b), e.cash(b), e.opened_day(b)),
+            (3, Some(7), 500, 3)
+        );
+        assert_eq!(e.producers(BREAD).collect::<Vec<_>>(), [2, 3]);
+        *e.stock_mut(b, BREAD) = 9;
+        let total = e.total_cash();
+        assert_eq!(e.close(b), 500);
+        assert_eq!(e.total_cash(), total - 500);
+        assert_eq!(
+            (e.is_open(b), e.owner(b), e.stock(b, BREAD)),
+            (false, None, 0)
+        );
+        assert_eq!(e.cheapest_seller(BREAD), None);
+        assert_eq!(e.open_business(c, 8, 9), 3);
+        assert_eq!(e.len(), 4);
+    }
+
+    #[test]
+    fn rising_prices_mark_a_shortage() {
+        let mut e = Economy::new(3, chain(), market());
+        *e.stock_mut(2, BREAD) = 1;
+        e.sell_one(2);
+        e.adjust_prices();
+        assert_eq!(e.shortage(BREAD), 125);
+        e.adjust_prices();
+        assert_eq!(e.shortage(BREAD), 109);
+        assert_eq!(e.shortage(FLOUR), 0);
     }
 
     #[test]

@@ -9,7 +9,7 @@ use timeloop_core::{Allowed, Minute, StateHash, World, WorldConfig, MINUTES_PER_
 pub const DAYS_PER_YEAR: u64 = 365;
 pub const YEAR: Minute = DAYS_PER_YEAR * MINUTES_PER_DAY;
 /// Values per day in [`Live::history`].
-pub const HISTORY_FIELDS: usize = 5;
+pub const HISTORY_FIELDS: usize = 6;
 
 pub struct Live {
     world: World,
@@ -18,7 +18,7 @@ pub struct Live {
     end: Minute,
     /// `checkpoints[y]` is the world at the start of year `y`.
     checkpoints: Vec<World>,
-    /// Per finished day: employed, homeless, food price, starving ‰, money Gini ‰.
+    /// Per finished day: employed, homeless, food price, starving ‰, money Gini ‰, open firms.
     history: Vec<i64>,
     starving_before: u64,
     /// Bumped whenever history is cut (rewind, restart), so viewers refetch it.
@@ -80,6 +80,7 @@ impl Live {
             food_price(w),
             starving as i64,
             s.money_gini_permille as i64,
+            s.firms as i64,
         ]);
         if w.now().is_multiple_of(YEAR) && self.checkpoints.len() as u64 == w.now() / YEAR {
             self.checkpoints.push(w.clone());
@@ -110,7 +111,7 @@ impl Live {
             t,
             "{{\"w\":{},\"h\":{},\"landBase\":{},\"landRadius\":{},\"end\":{},\"agents\":{},\
              \"actions\":[\"idle\",\"eat\",\"sleep\",\"work\",\"overtime\",\"wander\",\"travel\"],\
-             \"historyFields\":[\"employed\",\"homeless\",\"food price\",\"starving ‰\",\"money gini ‰\"],\
+             \"historyFields\":[\"employed\",\"homeless\",\"food price\",\"starving ‰\",\"money gini ‰\",\"firms\"],\
              \"businesses\":[",
             m.width,
             m.height,
@@ -155,6 +156,7 @@ impl Live {
 
     /// The world now. Agents are flat, 7 values each: x and y in tenths of a
     /// parcel, action, hunger, money, home and employer (-1 for none).
+    /// Businesses come with their state, as firms open and close.
     pub fn state_json(&self) -> String {
         let w = &self.world;
         let s = w.stats();
@@ -183,10 +185,34 @@ impl Live {
                 w.employer(a).map_or(-1, |b| b as i64)
             );
         }
+        let e = w.economy();
+        let c = w.config();
+        t.push_str("],\"businesses\":[");
+        for b in 0..e.len() {
+            let sep = if b > 0 { "," } else { "" };
+            let bc = e.config(b);
+            let _ = write!(
+                t,
+                "{sep}{{\"name\":{},\"good\":{},\"x\":{},\"y\":{},\"slots\":{},\"open\":{},\
+                 \"owner\":{},\"cash\":{},\"price\":{},\"wage\":{},\"workers\":{},\"since\":{}}}",
+                json_string(&bc.name),
+                json_string(&c.goods[bc.output as usize]),
+                bc.pos.x,
+                bc.pos.y,
+                bc.slots,
+                e.is_open(b),
+                e.owner(b).map_or(-1, |o| o as i64),
+                e.cash(b),
+                e.price(b),
+                e.wage(b),
+                e.workers(b),
+                e.opened_day(b)
+            );
+        }
         let _ = write!(
             t,
-            "],\"rent\":{:?},\"tenants\":{:?},\"workers\":{:?},\"prices\":{:?},\"land\":[",
-            s.rents, s.tenants, s.workers, s.prices
+            "],\"rent\":{:?},\"tenants\":{:?},\"firms\":{},\"land\":[",
+            s.rents, s.tenants, s.firms
         );
         let m = &w.config().map;
         for y in 0..m.height {

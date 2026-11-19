@@ -3,7 +3,8 @@
 //! An agent only computes when its `Wake` event fires: it settles the action
 //! it was doing, picks the next one and schedules its next wake-up. Between
 //! wake-ups nothing is ticked; needs grow lazily. Once a day, `DayStart` runs
-//! the market: restocking, prices, wages, layoffs and hiring.
+//! the market: rent and homes, restocking, prices, wages, firms closing,
+//! layoffs, one firm founded, hiring and dividends.
 
 use std::fmt;
 
@@ -26,8 +27,8 @@ const NO_HOME: HouseId = HouseId::MAX;
 
 /// Every business keeps this many workers no matter its cash: they are never
 /// laid off, accept partial pay and are hired even when the till is empty.
-/// Stands in for owners until firms get them (iteration 4); without it a
-/// business with no cash can never produce again.
+/// In a founded firm that is the CEO; the town's businesses hire one. Without
+/// it a business with no cash can never produce again.
 const CORE_CREW: u32 = 1;
 
 /// Hire only with this many days of payroll in cash; lay off below one day.
@@ -165,6 +166,16 @@ pub enum JobChange {
     LaidOff,
     /// Quit because the employer could not pay the full wage.
     QuitUnpaid,
+    /// Left to run a firm of their own.
+    Left,
+    /// The firm closed.
+    Closed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FirmChange {
+    Founded { at_pos: Pos },
+    Closed,
 }
 
 /// One line of the event log.
@@ -193,6 +204,12 @@ pub enum LogEntry {
         agent: u32,
         house: HouseId,
         change: HomeChange,
+    },
+    Firm {
+        at: Minute,
+        agent: u32,
+        business: BusinessId,
+        change: FirmChange,
     },
 }
 
@@ -240,6 +257,8 @@ impl fmt::Display for LogEntry {
                     JobChange::Hired => "hired by",
                     JobChange::LaidOff => "laid off by",
                     JobChange::QuitUnpaid => "quit unpaid at",
+                    JobChange::Left => "left",
+                    JobChange::Closed => "lost the job, closed:",
                 };
                 write!(f, "{} a{agent} {what} b{business}", clock(at))
             }
@@ -256,6 +275,17 @@ impl fmt::Display for LogEntry {
                 };
                 write!(f, "{} a{agent} {what} h{house}", clock(at))
             }
+            LogEntry::Firm {
+                at,
+                agent,
+                business,
+                change,
+            } => match change {
+                FirmChange::Founded { at_pos } => {
+                    write!(f, "{} a{agent} founded b{business} at {at_pos}", clock(at))
+                }
+                FirmChange::Closed => write!(f, "{} a{agent} closed b{business}", clock(at)),
+            },
         }
     }
 }
@@ -296,6 +326,12 @@ pub struct Stats {
     pub homeless: u32,
     /// Mean distance home to work of employed agents with a home, in hundredths of a parcel.
     pub commute_centi: u32,
+    /// Open firms founded by agents.
+    pub firms: u32,
+    pub firms_founded_total: u64,
+    pub firms_closed_total: u64,
+    /// Money held by firm owners (agents), summed.
+    pub money_owners: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -327,6 +363,10 @@ pub struct World {
     /// Smoothed minutes worked per day (3/4 old + 1/4 yesterday).
     work_recent: Vec<u64>,
     meals_total: u64,
+    /// Firm the agent owns, or `NO_EMPLOYER`.
+    owns: Vec<BusinessId>,
+    firms_founded: u64,
+    firms_closed: u64,
 }
 
 impl World {
@@ -384,6 +424,9 @@ impl World {
             work_at_day_start: vec![0; n],
             work_recent: vec![0; n],
             meals_total: 0,
+            owns: vec![NO_EMPLOYER; n],
+            firms_founded: 0,
+            firms_closed: 0,
             config,
         }
     }
@@ -495,6 +538,11 @@ impl World {
         self.money[agent as usize]
     }
 
+    /// The firm `agent` owns and runs as CEO.
+    pub fn owned_firm(&self, agent: u32) -> Option<BusinessId> {
+        Some(self.owns[agent as usize]).filter(|&b| b != NO_EMPLOYER)
+    }
+
     pub fn employer(&self, agent: u32) -> Option<BusinessId> {
         let e = self.employer[agent as usize];
         (e != NO_EMPLOYER).then_some(e)
@@ -522,13 +570,18 @@ impl World {
 
     /// Safety need: 1000 with no savings, 0 once savings cover the reserve.
     pub fn safety(&self, agent: u32) -> u32 {
-        let b = &self.config.behaviour;
-        let target = b.safety_reserve_days * b.meals_per_day * self.food_list_price();
+        let target = self.safety_target();
         if target <= 0 {
             return 0;
         }
         let covered = self.money[agent as usize].max(0).min(target) * NEED_MAX as i64 / target;
         NEED_MAX - covered as u32
+    }
+
+    /// Savings at which an agent feels safe.
+    fn safety_target(&self) -> i64 {
+        let b = &self.config.behaviour;
+        b.safety_reserve_days * b.meals_per_day * self.food_list_price()
     }
 
     /// Money held by agents and businesses together. Constant over time.
@@ -567,6 +620,13 @@ impl World {
                 .collect(),
             homeless: self.home.iter().filter(|&&h| h == NO_HOME).count() as u32,
             commute_centi: self.commute_centi(),
+            firms: self.owns.iter().filter(|&&b| b != NO_EMPLOYER).count() as u32,
+            firms_founded_total: self.firms_founded,
+            firms_closed_total: self.firms_closed,
+            money_owners: (0..self.config.agents as usize)
+                .filter(|&i| self.owns[i] != NO_EMPLOYER)
+                .map(|i| self.money[i])
+                .sum(),
         }
     }
 
@@ -638,8 +698,13 @@ impl World {
         self.economy.adjust_prices();
         let job_seekers = self.employer.contains(&NO_EMPLOYER);
         self.economy.adjust_wages(hours, job_seekers);
+        self.economy.update_broke_days(hours);
+        self.close_firms(at, log);
 
         for b in 0..self.economy.len() {
+            if !self.economy.is_open(b) {
+                continue;
+            }
             // Lay off while one day of payroll is not covered.
             while self.economy.workers(b) > CORE_CREW
                 && self.economy.cash(b)
@@ -657,8 +722,13 @@ impl World {
             }
         }
 
+        self.found_firm(at, log);
+
         // Core crews first, so every link of the chain can produce.
         for b in 0..self.economy.len() {
+            if !self.economy.is_open(b) {
+                continue;
+            }
             while self.economy.workers(b) < CORE_CREW.min(self.economy.config(b).slots) {
                 let Some(agent) = self.hire_candidate() else {
                     break;
@@ -803,7 +873,8 @@ impl World {
     fn wants_to_hire(&self, b: BusinessId, hours: i64) -> bool {
         let e = &self.economy;
         let workers = e.workers(b);
-        workers < e.config(b).slots
+        e.is_open(b)
+            && workers < e.config(b).slots
             && !self.overstocked(b)
             && e.cash(b) >= HIRE_RESERVE_DAYS * e.payroll_per_day(b, workers + 1, hours)
     }
@@ -821,10 +892,10 @@ impl World {
 
     /// Workers with savings above the safety reserve go first, as they can
     /// afford it; among them whoever worked least lately, then the most
-    /// savings, then the highest ID.
+    /// savings, then the highest ID. Never the owner.
     fn layoff_candidate(&self, b: BusinessId) -> u32 {
         (0..self.config.agents)
-            .filter(|&a| self.employer[a as usize] == b)
+            .filter(|&a| self.employer[a as usize] == b && self.owns[a as usize] != b)
             .max_by_key(|&a| {
                 let i = a as usize;
                 let can_afford = self.safety(a) == 0;
@@ -845,12 +916,22 @@ impl World {
             .min_by_key(|&a| (self.money[a as usize], a))
     }
 
-    /// Pays every business's surplus cash out in equal shares to agents whose
-    /// savings are below the safety reserve (everyone, if nobody is). Stands
-    /// in for owners and town welfare until those exist; without it money
-    /// piles up where nobody spends it and demand dies.
+    /// Pays every business's surplus cash out: a firm's to its owner after
+    /// the profit tax; the tax and the town businesses' surplus in equal
+    /// shares to agents whose savings are below the safety reserve
+    /// (everyone, if nobody is). That town welfare keeps money from piling
+    /// up where nobody spends it, which would kill demand.
     fn pay_dividends(&mut self) {
         let hours = self.config.work_hours();
+        // Comfort spending comes first and joins the rent in the town's payout.
+        let target = self.safety_target();
+        let permille = self.config.behaviour.comfort_spend_permille;
+        let mut comfort = 0;
+        for m in &mut self.money {
+            let spend = (*m - target).max(0) * permille / 1000;
+            *m -= spend;
+            comfort += spend;
+        }
         let needy: Vec<usize> = (0..self.config.agents)
             .filter(|&a| self.safety(a) > 0)
             .map(|a| a as usize)
@@ -864,14 +945,20 @@ impl World {
         if n == 0 {
             return;
         }
+        let tax = (self.config.behaviour.founding.as_ref()).map_or(0, |f| f.profit_tax_percent);
         for b in 0..self.economy.len() {
-            let surplus = self.economy.take_surplus(b, hours);
+            let mut surplus = self.economy.take_surplus(b, hours);
+            if let Some(owner) = self.economy.owner(b) {
+                let dividend = surplus * (100 - tax) / 100;
+                self.money[owner as usize] += dividend;
+                surplus -= dividend;
+            }
             let share = surplus / n;
             recipients.iter().for_each(|&i| self.money[i] += share);
             self.economy.add_cash(b, surplus - share * n);
         }
         // Houses have no costs yet: all rent flows back the same way.
-        let mut rent = 0;
+        let mut rent = comfort;
         for h in 0..self.housing.len() {
             rent += self.housing.take_cash(h);
         }
@@ -880,6 +967,168 @@ impl World {
         if !self.housing.is_empty() {
             // The remainder stays with the first house until tomorrow.
             self.housing.add_cash(0, rent - share * n);
+        }
+    }
+
+    /// What founding a firm on the blueprint `t` looks like today: lowest
+    /// price and unit cost among the open producers, shortage, their count
+    /// and days since the newest of them opened.
+    fn market_vars(&self, t: BusinessId) -> [i64; 5] {
+        let e = &self.economy;
+        let good = e.config(t).output;
+        let producers: Vec<BusinessId> = e.producers(good).collect();
+        let lowest = |f: &dyn Fn(BusinessId) -> i64| producers.iter().map(|&b| f(b)).min();
+        [
+            lowest(&|b| e.price(b)).unwrap_or(e.config(t).start_price),
+            lowest(&|b| e.unit_cost(b)).unwrap_or(0),
+            e.shortage(good) as i64,
+            producers.len() as i64,
+            producers
+                .iter()
+                .map(|&b| self.day().saturating_sub(e.opened_day(b)) as i64)
+                .min()
+                .unwrap_or(i64::MAX),
+        ]
+    }
+
+    /// Blueprints for founded firms: the first business of the world file
+    /// making each good.
+    fn blueprints(&self) -> Vec<BusinessId> {
+        let b = &self.config.businesses;
+        (0..b.len())
+            .filter(|&i| b[..i].iter().all(|o| o.output != b[i].output))
+            .map(|i| i as BusinessId)
+            .collect()
+    }
+
+    /// The best founding of the day, if any is allowed: (agent, blueprint).
+    /// Ties go to the lower agent ID, then the lower blueprint.
+    pub fn founding_choice(&self) -> Option<(u32, BusinessId, i64)> {
+        let rule = self.config.behaviour.founding.as_ref()?;
+        let open = self.owns.iter().filter(|&&b| b != NO_EMPLOYER).count() as u32;
+        if open >= rule.max_firms {
+            return None;
+        }
+        let kinds: Vec<(BusinessId, [i64; 5])> = (self.blueprints().into_iter())
+            .map(|t| (t, self.market_vars(t)))
+            .collect();
+        let mut best: Option<(u32, BusinessId, i64)> = None;
+        for agent in 0..self.config.agents {
+            if self.owns[agent as usize] != NO_EMPLOYER {
+                continue;
+            }
+            let mut v = self.vars(agent, self.now);
+            for &(t, m) in &kinds {
+                v[var::MARKET_PRICE..=var::MARKET_NEWEST_DAYS].copy_from_slice(&m);
+                if v[var::MONEY] < rule.capital
+                    || rule.when.as_ref().is_some_and(|f| f.eval(&v) <= 0)
+                {
+                    continue;
+                }
+                let score = rule.score.eval(&v);
+                if best.is_none_or(|(_, _, s)| score > s) {
+                    best = Some((agent, t, score));
+                }
+            }
+        }
+        best
+    }
+
+    /// At most one new firm a day, next to the founder's home.
+    fn found_firm(&mut self, at: Minute, log: &mut impl FnMut(LogEntry)) {
+        let Some((agent, t, _)) = self.founding_choice() else {
+            return;
+        };
+        let i = agent as usize;
+        let near = self
+            .home(agent)
+            .map_or(self.pos[i], |h| self.housing.config(h).pos);
+        let Some(pos) = self.map.free_parcel_near(near) else {
+            return;
+        };
+        let capital = self
+            .config
+            .behaviour
+            .founding
+            .as_ref()
+            .map_or(0, |f| f.capital);
+        let [price, ..] = self.market_vars(t);
+        let blueprint = &self.config.businesses[t as usize];
+        let config = BusinessConfig {
+            name: format!("{} (a{agent})", blueprint.name),
+            pos,
+            start_cash: capital,
+            start_price: price,
+            start_wage: self.economy.wage(t),
+            start_stock: 0,
+            ..blueprint.clone()
+        };
+        self.money[i] -= capital;
+        let b = self
+            .economy
+            .open_business(config, agent, at / MINUTES_PER_DAY);
+        self.map.build(pos, Building::Business(b));
+        self.owns[i] = b;
+        self.firms_founded += 1;
+        log(LogEntry::Firm {
+            at,
+            agent,
+            business: b,
+            change: FirmChange::Founded { at_pos: pos },
+        });
+        if self.employer[i] != NO_EMPLOYER {
+            self.leave_job(agent, self.employer[i], JobChange::Left, at, log);
+        }
+        self.hire(agent, b, at, log);
+    }
+
+    /// Every open business reads the close rule (a firm through its CEO);
+    /// a closing one lets everyone go and hands its cash to the owner. A
+    /// town business that closes stays closed; founders can take its place.
+    fn close_firms(&mut self, at: Minute, log: &mut impl FnMut(LogEntry)) {
+        let Some(rule) = self.config.behaviour.founding.as_ref() else {
+            return;
+        };
+        let closing: Vec<BusinessId> = (0..self.economy.len())
+            .filter(|&b| {
+                if !self.economy.is_open(b) {
+                    return false;
+                }
+                let v = match self.economy.owner(b) {
+                    Some(owner) => self.vars(owner, self.now),
+                    None => {
+                        let mut v = [0; MAX_VARS];
+                        self.firm_vars(b, self.now, &mut v);
+                        v
+                    }
+                };
+                rule.close_when.eval(&v) > 0
+            })
+            .collect();
+        for b in closing {
+            for a in 0..self.config.agents {
+                if self.employer[a as usize] == b {
+                    self.leave_job(a, b, JobChange::Closed, at, log);
+                }
+            }
+            let owner = self.economy.owner(b);
+            let cash = self.economy.close(b);
+            self.map.clear(self.economy.config(b).pos);
+            match owner {
+                Some(o) => {
+                    self.money[o as usize] += cash;
+                    self.owns[o as usize] = NO_EMPLOYER;
+                }
+                // Town cash goes to the needy with today's rent payout.
+                None => self.housing.add_cash(0, cash),
+            }
+            self.firms_closed += 1;
+            log(LogEntry::Firm {
+                at,
+                agent: owner.unwrap_or(u32::MAX),
+                business: b,
+                change: FirmChange::Closed,
+            });
         }
     }
 
@@ -968,7 +1217,7 @@ impl World {
                 let owed = self.economy.wage(b) * elapsed as i64 / 60;
                 let paid = self.economy.pay(b, owed);
                 self.money[i] += paid;
-                if paid < owed && self.economy.workers(b) > CORE_CREW {
+                if paid < owed && self.economy.workers(b) > CORE_CREW && self.owns[i] != b {
                     self.leave_job(agent, b, JobChange::QuitUnpaid, now, log);
                 }
             }
@@ -1032,10 +1281,24 @@ impl World {
                 self.housing.config(h).pos.distance(self.work_pos(agent)) as i64;
             v[var::HOUSE_CURRENT] = 1;
         }
+        if let Some(f) = &c.behaviour.founding {
+            v[var::FIRM_CAPITAL] = f.capital;
+        }
+        if self.owns[i] != NO_EMPLOYER {
+            self.firm_vars(self.owns[i], now, &mut v);
+        }
         for (t, &value) in self.traits(agent).iter().enumerate() {
             v[var::TRAITS + t] = value as i64;
         }
         v
+    }
+
+    fn firm_vars(&self, b: BusinessId, now: Minute, v: &mut [i64; MAX_VARS]) {
+        let e = &self.economy;
+        v[var::OWNS_FIRM] = 1;
+        v[var::FIRM_CASH] = e.cash(b);
+        v[var::FIRM_BROKE_DAYS] = e.broke_days(b) as i64;
+        v[var::FIRM_AGE_DAYS] = (now / MINUTES_PER_DAY).saturating_sub(e.opened_day(b)) as i64;
     }
 
     /// Built-in preconditions that data cannot override.
@@ -1214,6 +1477,9 @@ impl StateHash for World {
         self.work_recent.iter().for_each(|&m| h.write_u64(m));
         h.write_u64(self.meals_total);
         h.write_u64(self.starving_minutes);
+        h.write_u32_slice(&self.owns);
+        h.write_u64(self.firms_founded);
+        h.write_u64(self.firms_closed);
     }
 }
 
@@ -1398,12 +1664,14 @@ pub(crate) mod tests {
                 })
                 .collect(),
             safety_reserve_days: 5,
+            comfort_spend_permille: 0,
             meals_per_day: 3,
             housing: HousingRule {
                 when: Some(compile(HOUSING.0)),
                 score: compile(HOUSING.1),
                 homeless_score: compile(HOUSING.2),
             },
+            founding: None,
         }
     }
 
@@ -1763,5 +2031,169 @@ pub(crate) mod tests {
         assert_eq!(w.land_price(far), 100);
         assert!(w.land_price(house) > w.land_price(Pos::new(house.x + 2, house.y)));
         assert!(w.land_price(house) > 100);
+    }
+}
+
+#[cfg(test)]
+mod firm_tests {
+    use super::tests::config;
+    use super::*;
+    use crate::behaviour::FoundingRule;
+    use crate::formula::Formula;
+
+    fn founding(when: &str, close: &str, tax: i64) -> WorldConfig {
+        let mut c = config();
+        let names = crate::behaviour::variable_names(&c.traits);
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let f = |s: &str| Formula::compile(s, &names).unwrap();
+        c.behaviour.founding = Some(FoundingRule {
+            when: Some(f(when)),
+            score: f("market.price - market.cost"),
+            close_when: f(close),
+            capital: 100,
+            profit_tax_percent: tax,
+            max_firms: 2,
+        });
+        c
+    }
+
+    fn log(w: &mut World, until: Minute) -> Vec<LogEntry> {
+        let mut out = Vec::new();
+        w.run_until(until, &mut |e| out.push(e));
+        out
+    }
+
+    #[test]
+    fn founder_pays_capital_runs_the_firm_and_money_stays() {
+        // Only bread, and only from day 2 on.
+        let mut w = World::new(
+            1,
+            founding(
+                "market.firms == 1 && hour == 0 && market.price > 30",
+                "0",
+                0,
+            ),
+        );
+        let supply = w.money_supply();
+        let entries = log(&mut w, 3 * MINUTES_PER_DAY);
+        let founded: Vec<_> = entries
+            .iter()
+            .filter_map(|e| match *e {
+                LogEntry::Firm {
+                    agent,
+                    business,
+                    change: FirmChange::Founded { at_pos },
+                    ..
+                } => Some((agent, business, at_pos)),
+                _ => None,
+            })
+            .collect();
+        assert!(!founded.is_empty(), "nobody founded a firm");
+        let (agent, b, pos) = founded[0];
+        let e = w.economy();
+        assert_eq!(e.owner(b), Some(agent));
+        assert_eq!(e.config(b).output, w.config().food);
+        assert_eq!(w.owned_firm(agent), Some(b));
+        assert_eq!(w.employer(agent), Some(b), "the founder works as CEO");
+        assert_eq!(w.map().at(pos), Some(Building::Business(b)));
+        assert_eq!(w.money_supply(), supply);
+        assert!(founded.len() <= 2, "max_firms caps founding");
+    }
+
+    #[test]
+    fn ceo_is_never_laid_off_and_gets_the_dividend() {
+        let mut w = World::new(3, founding("market.firms == 1", "0", 0));
+        let supply = w.money_supply();
+        let mut ceos = Vec::new();
+        for _ in 0..200 {
+            let until = w.now() + MINUTES_PER_DAY;
+            let entries = log(&mut w, until);
+            for e in entries {
+                if let LogEntry::Job {
+                    agent,
+                    business,
+                    change: JobChange::LaidOff | JobChange::QuitUnpaid,
+                    ..
+                } = e
+                {
+                    assert_ne!(
+                        w.economy().owner(business),
+                        Some(agent),
+                        "CEO left its own firm"
+                    );
+                }
+            }
+            for a in 0..w.agent_count() {
+                if let Some(b) = w.owned_firm(a) {
+                    assert_eq!(w.employer(a), Some(b));
+                    ceos.push(a);
+                }
+            }
+            assert_eq!(w.money_supply(), supply);
+        }
+        assert!(!ceos.is_empty());
+    }
+
+    #[test]
+    fn a_closing_firm_frees_its_parcel_and_pays_out_its_cash() {
+        let mut w = World::new(
+            1,
+            founding(
+                "market.firms == 1 && firm.age_days == 0",
+                "firm.age_days >= 3",
+                0,
+            ),
+        );
+        let supply = w.money_supply();
+        let entries = log(&mut w, 10 * MINUTES_PER_DAY);
+        let closed: Vec<_> = entries
+            .iter()
+            .filter_map(|e| match *e {
+                LogEntry::Firm {
+                    agent,
+                    business,
+                    change: FirmChange::Closed,
+                    ..
+                } => Some((agent, business)),
+                _ => None,
+            })
+            .collect();
+        // Town businesses are always older than three days too.
+        assert!(
+            closed.iter().any(|&(_, b)| b < 3),
+            "town businesses follow the rule"
+        );
+        for &(agent, b) in &closed {
+            let e = w.economy();
+            if e.is_open(b) {
+                continue; // reused by a later founding
+            }
+            assert_eq!(e.cash(b), 0);
+            assert_eq!(e.workers(b), 0);
+            assert_ne!(w.map().at(e.config(b).pos), Some(Building::Business(b)));
+            if agent != u32::MAX {
+                assert_ne!(w.owned_firm(agent), Some(b));
+            }
+        }
+        assert_eq!(w.money_supply(), supply);
+    }
+
+    #[test]
+    fn profit_tax_splits_the_surplus() {
+        let mut w = World::new(1, founding("market.firms == 1", "0", 25));
+        w.run_days(2);
+        let (owner, b) = (0..w.agent_count())
+            .find_map(|a| w.owned_firm(a).map(|b| (a, b)))
+            .expect("a firm was founded");
+        w.economy.add_cash(b, 10_000);
+        let hours = w.config.work_hours();
+        let surplus = w.economy.cash(b) - 3 * w.economy.reserve(b, hours) / 2;
+        // Rich, so no welfare share; comfort spending is off in this config.
+        w.money[owner as usize] += 100_000;
+        let before = w.money(owner);
+        let supply = w.money_supply();
+        w.pay_dividends();
+        assert_eq!(w.money(owner) - before, surplus * 75 / 100);
+        assert_eq!(w.money_supply(), supply);
     }
 }

@@ -137,6 +137,11 @@ max_sleep_minutes = 600
 reserve_days = 5
 meals_per_day = 3
 
+# Comfort: 2% a day of savings beyond the safety reserve go to comforts the
+# town provides (paid back out as welfare).
+[needs.comfort]
+spend_permille = 20
+
 [meal]
 relief = 300
 minutes = 30
@@ -171,3 +176,14 @@ score = "need.safety / 2 + trait.greed / 2 - need.fatigue * trait.work_life / 10
 
 [action.wander]
 score = "300 + trait.work_life / 4"
+
+# Firms. A founder needs the capital in cash and, by default, a good that
+# ran short lately and sells well above what it costs to make.
+[founding]
+capital = 300
+profit_tax_percent = 50
+max_firms = 8
+when = "money >= firm.capital + 100 && market.newest_days >= 365 && market.price * 100 >= market.cost * 150"
+score = "(market.price - market.cost) * 1000 / max(market.cost, 1) + market.shortage + trait.greed / 2"
+# Broke for a month: give up. Town businesses follow the same rule.
+close = "firm.broke_days >= 30"

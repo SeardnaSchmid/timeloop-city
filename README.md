@@ -22,7 +22,8 @@ cargo run --release -p timeloop-sim -- --agents 1 --days 2 --log
 
 Add `--stats FILE` to write one CSV row per day (money, prices, wages, cash,
 staff, stock, employment, hunger, meals, work hours, money Gini, share of
-time spent starving, rent and tenants per house, homeless, mean commute):
+time spent starving, rent and tenants per house, homeless, mean commute,
+founded firms open / founded / closed, money held by firm owners):
 
 ```bash
 cargo run --release -p timeloop-sim -- --days 3650 --stats stats.csv --quiet
@@ -47,10 +48,25 @@ free bed against its own and against staying homeless (`[housing]` formulas),
 so people move closer to work when it pays. Without a home, sleep recovers at
 half the rate.
 
+The businesses of the world file belong to the town; their surplus goes to
+agents short of savings (welfare). Agents found more (`[founding]`): once a
+day everyone without a firm scores founding one for each good, reading
+`market.price`, `market.cost`, `market.shortage`, `market.firms` and
+`market.newest_days`; by default a good must sell at 1.5 times its cost and
+nobody may have started making it in the last year. The best founding of the
+day happens: the founder pays the capital, builds on the free parcel nearest
+home and runs the firm as CEO (works there, is never laid off, takes what the
+till can pay). The firm's surplus goes to the owner after a profit tax that
+joins the welfare. Any business that has been broke for a month closes (its
+cash to the owner, its stock lost); a broke business may sell below cost.
+Above safety, agents spend 2% a day of their savings beyond the reserve on
+comforts (`[needs.comfort]`); without that, owners end up holding all the
+money and demand dies.
+
 To watch and steer the town live, start the engine as a local server and
 open the page it prints. The engine runs natively in its own thread for up to
 80 years (`--years N` to change); the page shows the map as it is right now,
-with play/pause, a speed control from 1 game minute per second up to as fast
+including founded firms (white corner, labelled with the owner), with play/pause, a speed control from 1 game minute per second up to as fast
 as possible (Space, arrow keys), a history chart to jump to any point (back
 via a checkpoint per year), restart with another seed, and for a clicked agent
 how it scores every action. Speed never changes the outcome: the state hash
@@ -80,7 +96,9 @@ a closed loop (never created or destroyed); prices and wages move in fixed daily
 steps. `sim/tests/bread_town.rs` checks that ten years stay fed and balanced;
 `sim/tests/traits.rs` checks that diligent and easygoing populations work
 different hours and end up with different wealth; `sim/tests/city.rs` checks
-that rents and vacancy settle and commutes get shorter.
+that vacancy settles, rents stay bounded and commutes get shorter;
+`sim/tests/firms.rs` checks that firms get founded and survive, the town eats
+better than without them and owners hold less than half the money.
 
 `content/data/world.toml` points at its schema, so editors with TOML schema
 support (Taplo / Even Better TOML) autocomplete and validate it. After changing

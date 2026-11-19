@@ -94,6 +94,14 @@ const t0 = F[0].t, tEnd = F[F.length - 1].t;
 let playhead = 0, playing = false, last = 0, selected = null;
 
 const goodColor = g => ({ grain: '--field', flour: '--mill', bread: '--bakery' }[g] || '--other');
+// Businesses in a frame; founded firms appear and close over time.
+const bizOf = fr => { const out = []; for (let k = 0; k < fr.biz.length / 5; k++) {
+  const [x, y, g, owner, open] = fr.biz.slice(k * 5, k * 5 + 5), town = owner < 0 && k < D.businesses.length;
+  const blueprint = D.businesses.find(b => b.good === D.goods[g]);
+  out.push({ x, y, owner, open: !!open, good: D.goods[g], name: town ? D.businesses[k].name : `${blueprint.name} (a${owner})`,
+    slots: blueprint.slots, workers: fr.work[k], price: fr.price[k] }); } return out; };
+const cheapest = (fr, g) => { const p = bizOf(fr).filter(b => b.open && b.good === g).map(b => b.price);
+  return p.length ? Math.min(...p) : null; };
 const fmtTime = t => { const d = Math.floor(t / 1440), m = t % 1440;
   const hm = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(Math.floor(m % 60)).padStart(2, '0')}`;
   return `year ${Math.floor(d / 365)} · day ${d % 365} · ${hm}`; };
@@ -157,12 +165,15 @@ function draw() {
     const half = ctx.measureText(txt).width / 2 + 2;
     const cx = Math.min(Math.max((x + .5) * cell, half), W - half);
     ctx.fillText(txt, cx, (y + 1) * cell + cell * .3); };
-  D.businesses.forEach((b, k) => {
+  bizOf(fr).forEach(b => {
+    if (!b.open) return;
     ctx.fillStyle = css(goodColor(b.good));
     ctx.fillRect(b.x * cell + 2, b.y * cell + 2, cell - 4, cell - 4);
+    if (b.owner >= 0) { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(b.x * cell + 2, b.y * cell + 2);
+      ctx.lineTo(b.x * cell + 2 + cell * .35, b.y * cell + 2); ctx.lineTo(b.x * cell + 2, b.y * cell + 2 + cell * .35); ctx.fill(); }
     ctx.fillStyle = '#fff'; ctx.font = `bold ${cell * .45}px system-ui`;
-    ctx.fillText(b.name[0].toUpperCase(), (b.x + .5) * cell, (b.y + .5) * cell);
-    label(`${b.name} ${fr.work[k]}/${b.slots}`, b.x, b.y);
+    ctx.fillText(b.good[0].toUpperCase(), (b.x + .5) * cell, (b.y + .5) * cell);
+    label(`${b.owner >= 0 ? 'a' + b.owner : b.name} ${b.workers}/${b.slots} · ${b.price}`, b.x, b.y);
   });
   D.houses.forEach((h, k) => {
     const x = h.x * cell + 2, y = h.y * cell + 2, s = cell - 4;
@@ -176,7 +187,7 @@ function draw() {
     const mark = (p, color) => { if (!p) return; ctx.strokeStyle = color; ctx.lineWidth = 2;
       ctx.strokeRect(p.x * cell + 1, p.y * cell + 1, cell - 2, cell - 2); ctx.lineWidth = 1; };
     mark(a.home >= 0 && D.houses[a.home], css('--sel'));
-    mark(a.job >= 0 && D.businesses[a.job], css('--sel'));
+    mark(a.job >= 0 && bizOf(fr)[a.job], css('--sel'));
   }
 
   // Agents: interpolated between frames, spread out when sharing a parcel.
@@ -213,7 +224,8 @@ function draw() {
   const hungry = Array.from({ length: N }, (_, k) => agentAt(i, k).hunger).filter(h => h >= 800).length;
   $('town').innerHTML = [
     ['employed', `${fr.emp} / ${N}`], ['homeless', fr.homeless], ['hungry (≥800)', hungry],
-    ...D.businesses.map((b, k) => [`${b.good} price`, fr.price[k]]),
+    ['founded firms open', bizOf(fr).filter(b => b.open && b.owner >= 0).length],
+    ...D.goods.map(g => [`${g} price (lowest)`, cheapest(fr, g) ?? '–']),
   ].map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
   showInfo(i);
   drawHistory();
@@ -223,7 +235,7 @@ function draw() {
 const series = [
   { name: 'employed', color: '--work', get: fr => fr.emp, max: N },
   { name: 'homeless', color: '--house', get: fr => fr.homeless, max: N },
-  { name: `${D.businesses[D.businesses.length - 1].good} price`, color: '--eat', get: fr => fr.price[fr.price.length - 1] },
+  { name: 'food price (lowest)', color: '--eat', get: fr => cheapest(fr, D.businesses[D.businesses.length - 1].good) ?? 0 },
 ];
 $('histLegend').innerHTML = series.map(s => `<span><span class="sw" style="background:var(${s.color})"></span>${s.name}</span>`).join('');
 const hist = $('hist'), hctx = hist.getContext('2d');
@@ -260,7 +272,7 @@ function showInfo(i) {
     const a = agentAt(i, selected.id);
     rows = [['action', D.actions[a.act]], ['hunger', a.hunger], ['money', a.money],
       ['home', a.home >= 0 ? D.houses[a.home].name : 'homeless'],
-      ['job', a.job >= 0 ? D.businesses[a.job].name : 'unemployed'],
+      ['job', a.job >= 0 ? bizOf(fr)[a.job].name : 'unemployed'],
       ...D.traits.map((t, n) => [t, D.agentTraits[selected.id][n]])];
     el.innerHTML = `<h2>Agent a${selected.id}</h2>`;
   } else if (selected.type === 'house') {
@@ -269,10 +281,10 @@ function showInfo(i) {
       ['parcel', `(${h.x}, ${h.y})`], ['land price', D.land[h.y * D.w + h.x]]];
     el.innerHTML = `<h2>House · ${h.name}</h2>`;
   } else {
-    const b = D.businesses[selected.id];
-    rows = [['makes', b.good], ['price', fr.price[selected.id]], ['workers', `${fr.work[selected.id]} / ${b.slots}`],
-      ['parcel', `(${b.x}, ${b.y})`]];
-    el.innerHTML = `<h2>Business · ${b.name}</h2>`;
+    const b = bizOf(fr)[selected.id];
+    rows = [['owner', b.owner >= 0 ? 'a' + b.owner : 'town'], ['open', b.open ? 'yes' : 'closed'], ['makes', b.good],
+      ['price', b.price], ['workers', `${b.workers} / ${b.slots}`], ['parcel', `(${b.x}, ${b.y})`]];
+    el.innerHTML = `<h2>${b.owner >= 0 ? 'Firm' : 'Town business'} · ${b.name}</h2>`;
   }
   el.innerHTML += '<table>' + rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('') + '</table>';
 }
@@ -285,7 +297,7 @@ canvas.addEventListener('click', e => {
   else {
     const x = Math.floor(mx / cell), y = Math.floor(my / cell);
     const h = D.houses.findIndex(h => h.x === x && h.y === y);
-    const b = D.businesses.findIndex(b => b.x === x && b.y === y);
+    const b = bizOf(F[Math.floor(playhead)]).findIndex(b => b.open && b.x === x && b.y === y);
     selected = h >= 0 ? { type: 'house', id: h } : b >= 0 ? { type: 'business', id: b } : null;
     if (!selected) $('info').innerHTML = '<h2>Selection</h2><div class="muted">Click an agent or a building.</div>';
   }

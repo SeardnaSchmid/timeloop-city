@@ -72,8 +72,8 @@ impl MapConfig {
     }
 }
 
-/// Which building stands where. Fixed for now; building and demolishing
-/// come with firms.
+/// Which building stands where. Houses are fixed; firms build on free
+/// parcels and leave them again when they close.
 #[derive(Clone, Debug)]
 pub struct Map {
     config: MapConfig,
@@ -100,6 +100,32 @@ impl Map {
 
     pub fn at(&self, p: Pos) -> Option<Building> {
         self.parcels[p.y as usize * self.config.width as usize + p.x as usize]
+    }
+
+    /// Puts `b` on the free parcel `p`.
+    pub fn build(&mut self, p: Pos, b: Building) {
+        let i = self.index(p);
+        assert!(self.parcels[i].is_none(), "{p} is taken");
+        self.parcels[i] = Some(b);
+    }
+
+    pub fn clear(&mut self, p: Pos) {
+        let i = self.index(p);
+        self.parcels[i] = None;
+    }
+
+    /// The free parcel closest to `from`; ties go to the lower y, then x.
+    pub fn free_parcel_near(&self, from: Pos) -> Option<Pos> {
+        let w = self.config.width as usize;
+        (0..self.parcels.len())
+            .filter(|&i| self.parcels[i].is_none())
+            .map(|i| Pos::new((i % w) as u16, (i / w) as u16))
+            .min_by_key(|&p| (p.distance(from), p.y, p.x))
+    }
+
+    fn index(&self, p: Pos) -> usize {
+        assert!(self.config.contains(p), "{p} is off the map");
+        p.y as usize * self.config.width as usize + p.x as usize
     }
 
     pub fn travel_minutes(&self, from: Pos, to: Pos) -> u64 {
@@ -147,5 +173,24 @@ mod tests {
         assert_eq!(m.at(Pos::new(1, 1)), None);
         assert_eq!(m.travel_minutes(Pos::new(0, 0), Pos::new(3, 2)), 25);
         assert_eq!(m.config().center(), Pos::new(2, 1));
+    }
+
+    #[test]
+    fn firms_build_on_the_nearest_free_parcel() {
+        let c = MapConfig {
+            width: 3,
+            height: 3,
+            travel_minutes_per_parcel: 1,
+            land_price_base: 1,
+            land_price_radius: 1,
+        };
+        let mut m = Map::new(c, [(Pos::new(1, 1), Building::House(0))]);
+        // (1,0) and (0,1) are both one away; lower y wins.
+        let p = m.free_parcel_near(Pos::new(1, 1)).unwrap();
+        assert_eq!(p, Pos::new(1, 0));
+        m.build(p, Building::Business(4));
+        assert_eq!(m.free_parcel_near(Pos::new(1, 1)), Some(Pos::new(0, 1)));
+        m.clear(p);
+        assert_eq!(m.at(p), None);
     }
 }

@@ -14,7 +14,10 @@ pub const MAX_TRAITS: usize = 16;
 /// `trait.<name>`.
 /// The `house.*` variables describe the house being considered; in action
 /// formulas that is the agent's current home (all 0 without one).
-pub const BASE_VARS: [&str; 16] = [
+/// The `market.*` variables describe the good a founder considers making
+/// (0 outside the founding rule); `firm.*` describe the firm the agent
+/// owns (0 without one), except `firm.capital`, the cost of founding one.
+pub const BASE_VARS: [&str; 26] = [
     "need.hunger",
     "need.fatigue",
     "need.safety",
@@ -31,6 +34,16 @@ pub const BASE_VARS: [&str; 16] = [
     "house.rent",
     "house.distance",
     "house.current",
+    "market.price",
+    "market.cost",
+    "market.shortage",
+    "market.firms",
+    "market.newest_days",
+    "firm.capital",
+    "owns_firm",
+    "firm.cash",
+    "firm.broke_days",
+    "firm.age_days",
 ];
 
 pub const MAX_VARS: usize = BASE_VARS.len() + MAX_TRAITS;
@@ -53,7 +66,20 @@ pub(crate) mod var {
     pub const HOUSE_RENT: usize = 13;
     pub const HOUSE_DISTANCE: usize = 14;
     pub const HOUSE_CURRENT: usize = 15;
-    pub const TRAITS: usize = 16;
+    pub const MARKET_PRICE: usize = 16;
+    #[allow(dead_code)]
+    pub const MARKET_COST: usize = 17;
+    #[allow(dead_code)]
+    pub const MARKET_SHORTAGE: usize = 18;
+    #[allow(dead_code)]
+    pub const MARKET_FIRMS: usize = 19;
+    pub const MARKET_NEWEST_DAYS: usize = 20;
+    pub const FIRM_CAPITAL: usize = 21;
+    pub const OWNS_FIRM: usize = 22;
+    pub const FIRM_CASH: usize = 23;
+    pub const FIRM_BROKE_DAYS: usize = 24;
+    pub const FIRM_AGE_DAYS: usize = 25;
+    pub const TRAITS: usize = 26;
 }
 
 /// All variable names for the given traits, in table order.
@@ -91,9 +117,37 @@ pub struct Behaviour {
     /// Savings worth this many days of meals make an agent feel safe.
     pub safety_reserve_days: i64,
     pub meals_per_day: i64,
+    /// Comfort, the level above safety: every day agents spend this many
+    /// thousandths of their savings above the safety reserve on comforts.
+    /// The town provides them, so the money flows back as welfare. Keeps
+    /// wealth from piling up at firm owners until there are luxury goods.
+    pub comfort_spend_permille: i64,
     /// Once a day every agent scores each house it could live in (one with
     /// a free bed, or its own) and staying homeless, and takes the best.
     pub housing: HousingRule,
+    /// Agents founding and closing firms; `None`: only the town's businesses.
+    pub founding: Option<FoundingRule>,
+}
+
+/// Once a day every agent without a firm scores founding one for each good
+/// the town makes (the first business making it is the blueprint); the best
+/// allowed founding of the day happens. The founder pays `capital` into the
+/// firm and runs it as CEO: works there, is never laid off, takes what the
+/// till can pay, and gets the surplus as dividend.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FoundingRule {
+    /// Founding is an option when this is > 0.
+    pub when: Option<Formula>,
+    pub score: Formula,
+    /// Read daily for every open business; it closes when > 0. Its cash
+    /// goes back to the owner, its stock is lost. For a firm the formula sees
+    /// its CEO's variables; for the town's businesses only `firm.*`.
+    pub close_when: Formula,
+    pub capital: i64,
+    /// Share of a firm's surplus the town takes for welfare; the owner gets the rest.
+    pub profit_tax_percent: i64,
+    /// Open founded firms at most.
+    pub max_firms: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

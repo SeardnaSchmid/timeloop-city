@@ -9,9 +9,9 @@ use std::{collections::BTreeMap, fmt, fs, path::Path};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use timeloop_core::{
-    variable_names, ActionKind, ActionRule, Behaviour, BusinessConfig, Formula, HouseConfig,
-    HousingConfig, HousingRule, MapConfig, MarketConfig, Population, Pos, RecipeInput, WorldConfig,
-    MAX_TRAITS, NEED_MAX,
+    variable_names, ActionKind, ActionRule, Behaviour, BusinessConfig, Formula, FoundingRule,
+    HouseConfig, HousingConfig, HousingRule, MapConfig, MarketConfig, Population, Pos, RecipeInput,
+    WorldConfig, MAX_TRAITS, NEED_MAX,
 };
 
 /// The bundled default world.
@@ -31,6 +31,9 @@ pub struct WorldFile {
     /// Houses in ID order. Each rents out beds by the day.
     house: Vec<HouseSection>,
     housing: HousingSection,
+    /// Agents founding firms. Without this section only the businesses
+    /// above exist.
+    founding: Option<FoundingSection>,
     traits: TraitsSection,
     /// Agent groups; agents are split over them in ID order, by weight.
     population: Vec<PopulationSection>,
@@ -86,6 +89,30 @@ struct HousingSection {
     score: String,
     /// Score of having no home.
     homeless_score: String,
+}
+
+/// Once a day every agent without a firm scores founding one for each good
+/// (the first business above making it is the blueprint); the best allowed
+/// founding happens, at most one a day. The founder pays `capital` into the
+/// firm and runs it as CEO; the firm's surplus goes to the founder.
+/// Formulas see the action variables plus `market.price` and `market.cost`
+/// (lowest price and unit cost of the good's makers), `market.shortage`
+/// (0-1000, how often it ran short lately), `market.firms` (its makers) and
+/// `firm.capital`. `close` is read daily for every CEO with `firm.cash`,
+/// `firm.broke_days` (days in a row without a day's payroll) and `firm.age_days`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct FoundingSection {
+    capital: i64,
+    /// Percent of a firm's surplus the town takes for welfare; the owner gets the rest.
+    profit_tax_percent: i64,
+    /// Open founded firms at most.
+    max_firms: u32,
+    /// Founding is an option when this is > 0.
+    when: Option<String>,
+    score: String,
+    /// The firm closes when this is > 0.
+    close: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -195,6 +222,16 @@ struct NeedsSection {
     hunger: HungerSection,
     fatigue: FatigueSection,
     safety: SafetySection,
+    comfort: Option<ComfortSection>,
+}
+
+/// Above safety: savings beyond the safety reserve are partly spent on
+/// comforts each day. The town provides them; the money returns as welfare.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ComfortSection {
+    /// Thousandths of the savings above the reserve spent per day.
+    spend_permille: i64,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -546,6 +583,16 @@ fn parse_behaviour(f: &WorldFile, traits: &[String]) -> Result<Behaviour, Conten
         actions: rules,
         safety_reserve_days: f.needs.safety.reserve_days,
         meals_per_day: f.needs.safety.meals_per_day,
+        comfort_spend_permille: match &f.needs.comfort {
+            None => 0,
+            Some(c) => {
+                check(
+                    (0..=1000).contains(&c.spend_permille),
+                    "needs.comfort.spend_permille must be 0..=1000",
+                )?;
+                c.spend_permille
+            }
+        },
         housing: HousingRule {
             when: h
                 .when
@@ -554,6 +601,28 @@ fn parse_behaviour(f: &WorldFile, traits: &[String]) -> Result<Behaviour, Conten
                 .transpose()?,
             score: compile(&h.score, "housing.score".into())?,
             homeless_score: compile(&h.homeless_score, "housing.homeless_score".into())?,
+        },
+        founding: match &f.founding {
+            None => None,
+            Some(fs) => {
+                check(fs.capital > 0, "founding.capital must be > 0")?;
+                check(
+                    (0..=100).contains(&fs.profit_tax_percent),
+                    "founding.profit_tax_percent must be 0..=100",
+                )?;
+                Some(FoundingRule {
+                    when: fs
+                        .when
+                        .as_deref()
+                        .map(|w| compile(w, "founding.when".into()))
+                        .transpose()?,
+                    score: compile(&fs.score, "founding.score".into())?,
+                    close_when: compile(&fs.close, "founding.close".into())?,
+                    capital: fs.capital,
+                    profit_tax_percent: fs.profit_tax_percent,
+                    max_firms: fs.max_firms,
+                })
+            }
         },
     })
 }
@@ -608,6 +677,8 @@ mod tests {
             ("min_minutes = 30", "min_minutes = 0"),
             ("food = \"bread\"", "food = \"cake\""),
             ("output = \"flour\"", "output = \"flower\""),
+            ("capital = 300", "capital = 0"),
+            ("close = \"", "close = \"firm.bank + "),
         ] {
             let text = DEFAULT_WORLD.replace(from, to);
             assert_ne!(text, DEFAULT_WORLD, "{from} not found");

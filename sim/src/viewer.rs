@@ -87,6 +87,22 @@ impl Recorder {
                 w.employer(a).map_or(-1, |b| b as i64),
             );
         }
+        // Businesses as firms open and close: x, y, good, owner (-1: town), open.
+        f.push_str("],\"biz\":[");
+        let e = w.economy();
+        for b in 0..e.len() {
+            let c = e.config(b);
+            let sep = if b > 0 { "," } else { "" };
+            let _ = write!(
+                f,
+                "{sep}{},{},{},{},{}",
+                c.pos.x,
+                c.pos.y,
+                c.output,
+                e.owner(b).map_or(-1, |o| o as i64),
+                e.is_open(b) as u8
+            );
+        }
         let _ = write!(
             f,
             "],\"rent\":{:?},\"ten\":{:?},\"work\":{:?},\"price\":{:?},\"emp\":{},\"homeless\":{},\"gini\":{}}}",
@@ -100,11 +116,12 @@ impl Recorder {
         let mut data = String::new();
         let _ = write!(
             data,
-            "{{\"w\":{},\"h\":{},\"step\":{},\"actions\":{},\"businesses\":[",
+            "{{\"w\":{},\"h\":{},\"step\":{},\"actions\":{},\"goods\":{},\"businesses\":[",
             m.width,
             m.height,
             self.step,
-            json_strings(ACTIONS.iter().copied())
+            json_strings(ACTIONS.iter().copied()),
+            json_strings(c.goods.iter().map(String::as_str))
         );
         for (i, b) in c.businesses.iter().enumerate() {
             if i > 0 {

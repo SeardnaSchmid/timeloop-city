@@ -18,6 +18,17 @@
         "$ref": "#/$defs/BusinessSection"
       }
     },
+    "founding": {
+      "description": "Agents founding firms. Without this section only the businesses\nabove exist.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FoundingSection"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "goods": {
       "$ref": "#/$defs/GoodsSection"
     },
@@ -198,6 +209,21 @@
         "output_target"
       ]
     },
+    "ComfortSection": {
+      "description": "Above safety: savings beyond the safety reserve are partly spent on\ncomforts each day. The town provides them; the money returns as welfare.",
+      "type": "object",
+      "properties": {
+        "spend_permille": {
+          "description": "Thousandths of the savings above the reserve spent per day.",
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "spend_permille"
+      ]
+    },
     "FatigueSection": {
       "type": "object",
       "properties": {
@@ -223,6 +249,49 @@
         "per_hour",
         "recovery_per_hour",
         "max_sleep_minutes"
+      ]
+    },
+    "FoundingSection": {
+      "description": "Once a day every agent without a firm scores founding one for each good\n(the first business above making it is the blueprint); the best allowed\nfounding happens, at most one a day. The founder pays `capital` into the\nfirm and runs it as CEO; the firm's surplus goes to the founder.\nFormulas see the action variables plus `market.price` and `market.cost`\n(lowest price and unit cost of the good's makers), `market.shortage`\n(0-1000, how often it ran short lately), `market.firms` (its makers) and\n`firm.capital`. `close` is read daily for every CEO with `firm.cash`,\n`firm.broke_days` (days in a row without a day's payroll) and `firm.age_days`.",
+      "type": "object",
+      "properties": {
+        "capital": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "close": {
+          "description": "The firm closes when this is > 0.",
+          "type": "string"
+        },
+        "max_firms": {
+          "description": "Open founded firms at most.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "profit_tax_percent": {
+          "description": "Percent of a firm's surplus the town takes for welfare; the owner gets the rest.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "score": {
+          "type": "string"
+        },
+        "when": {
+          "description": "Founding is an option when this is > 0.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "capital",
+        "profit_tax_percent",
+        "max_firms",
+        "score",
+        "close"
       ]
     },
     "GoodsSection": {
@@ -470,6 +539,16 @@
     "NeedsSection": {
       "type": "object",
       "properties": {
+        "comfort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ComfortSection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "fatigue": {
           "$ref": "#/$defs/FatigueSection"
         },

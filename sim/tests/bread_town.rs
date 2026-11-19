@@ -1,5 +1,5 @@
 //! Iteration 2 acceptance: the bundled bread town runs ten years without
-//! famine, runaway stock or money appearing from nowhere.
+//! famine, runaway stock (in any one business) or money appearing from nowhere.
 
 use timeloop_core::{World, MINUTES_PER_DAY};
 
@@ -26,7 +26,9 @@ fn ten_years_stay_fed_and_balanced() {
             if day > 365 {
                 meals += s.meals_total - meals_before;
                 employed += s.employed as u64;
-                max_stock = max_stock.max(*s.stock.iter().max().unwrap());
+                let e = world.economy();
+                let stock = (0..e.len()).map(|b| e.stock(b, e.config(b).output)).max();
+                max_stock = max_stock.max(stock.unwrap_or(0));
             }
             meals_before = s.meals_total;
         }
