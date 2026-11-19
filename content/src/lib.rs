@@ -9,8 +9,9 @@ use std::{collections::BTreeMap, fmt, fs, path::Path};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use timeloop_core::{
-    variable_names, ActionKind, ActionRule, Behaviour, BusinessConfig, Formula, MarketConfig,
-    Population, RecipeInput, WorldConfig, MAX_TRAITS, NEED_MAX,
+    variable_names, ActionKind, ActionRule, Behaviour, BusinessConfig, Formula, HouseConfig,
+    HousingConfig, HousingRule, MapConfig, MarketConfig, Population, Pos, RecipeInput, WorldConfig,
+    MAX_TRAITS, NEED_MAX,
 };
 
 /// The bundled default world.
@@ -26,6 +27,10 @@ pub struct WorldFile {
     /// Businesses in ID order. Order matters: ties go to the lower ID.
     business: Vec<BusinessSection>,
     market: MarketSection,
+    map: MapSection,
+    /// Houses in ID order. Each rents out beds by the day.
+    house: Vec<HouseSection>,
+    housing: HousingSection,
     traits: TraitsSection,
     /// Agent groups; agents are split over them in ID order, by weight.
     population: Vec<PopulationSection>,
@@ -36,6 +41,51 @@ pub struct WorldFile {
     /// Decision rules per action: eat, sleep, work, overtime, wander. An
     /// action without a rule never happens; wander is the fallback.
     action: BTreeMap<String, ActionSection>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct MapSection {
+    /// Parcels across; x runs 0..width.
+    width: u16,
+    /// Parcels down; y runs 0..height.
+    height: u16,
+    /// Walking time per parcel (Manhattan distance).
+    travel_minutes_per_parcel: u64,
+    /// Land price of a parcel far from any house.
+    land_price_base: i64,
+    /// Houses closer than this raise the land price around them by their rent.
+    land_price_radius: u32,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct HouseSection {
+    name: String,
+    x: u16,
+    y: u16,
+    beds: u32,
+    /// Starting rent per bed and day.
+    rent: i64,
+}
+
+/// Once a day every agent scores each house it could move into (or its own)
+/// against staying homeless and takes the best. Formulas see the action
+/// variables plus `house.rent`, `house.distance` (to work, or the town centre
+/// when unemployed) and `house.current` (1 for its own home).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct HousingSection {
+    /// Daily rent change: up when full and someone was turned away, down when beds stay free.
+    rent_step: i64,
+    rent_min: i64,
+    /// Sleep recovery without a home, in percent of the normal rate.
+    homeless_recovery_percent: u32,
+    /// The house is an option when this is > 0.
+    when: Option<String>,
+    score: String,
+    /// Score of having no home.
+    homeless_score: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -92,6 +142,9 @@ struct GoodsSection {
 #[serde(deny_unknown_fields)]
 struct BusinessSection {
     name: String,
+    /// Parcel the business stands on.
+    x: u16,
+    y: u16,
     /// Good this business produces and sells.
     output: String,
     /// Input consumed per unit of output. Omit for raw producers (fields, mines).
@@ -157,6 +210,8 @@ struct HungerSection {
 struct FatigueSection {
     per_hour: u32,
     recovery_per_hour: u32,
+    /// Longest sleep in minutes; agents get up then even if not rested.
+    max_sleep_minutes: u64,
 }
 
 /// Safety is 1000 without savings and 0 once savings cover the reserve.
@@ -258,6 +313,7 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
         check(b.price > 0, format!("{} must be > 0", at("price")))?;
         businesses.push(BusinessConfig {
             name: b.name.clone(),
+            pos: Pos::new(b.x, b.y),
             output: good_id(&b.output, &at("output"))?,
             input,
             output_milli_per_worker_hour: b.output_milli_per_worker_hour,
@@ -361,7 +417,61 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
             traits: ranges,
         });
     }
-    let behaviour = parse_behaviour(&f.action, &traits, s.reserve_days, s.meals_per_day)?;
+    let mc = &f.map;
+    check(
+        mc.width > 0 && mc.height > 0,
+        "map width and height must be > 0",
+    )?;
+    let map = MapConfig {
+        width: mc.width,
+        height: mc.height,
+        travel_minutes_per_parcel: mc.travel_minutes_per_parcel,
+        land_price_base: mc.land_price_base,
+        land_price_radius: mc.land_price_radius,
+    };
+    let houses: Vec<HouseConfig> = f
+        .house
+        .iter()
+        .map(|h| HouseConfig {
+            name: h.name.clone(),
+            pos: Pos::new(h.x, h.y),
+            beds: h.beds,
+            start_rent: h.rent,
+        })
+        .collect();
+    let mut placed: Vec<(Pos, String)> = Vec::new();
+    let sites = (businesses
+        .iter()
+        .map(|b| (b.pos, format!("business \"{}\"", b.name))))
+    .chain(
+        houses
+            .iter()
+            .map(|h| (h.pos, format!("house \"{}\"", h.name))),
+    );
+    for (pos, what) in sites {
+        check(map.contains(pos), format!("{what}: {pos} is off the map"))?;
+        if let Some((_, other)) = placed.iter().find(|(p, _)| *p == pos) {
+            return Err(ContentError::Invalid(format!(
+                "{what} and {other} both stand on {pos}"
+            )));
+        }
+        placed.push((pos, what));
+    }
+    for h in &f.house {
+        check(h.beds > 0, format!("house \"{}\".beds must be > 0", h.name))?;
+    }
+    let hs = &f.housing;
+    check(hs.rent_min >= 0, "housing.rent_min must be >= 0")?;
+    check(
+        (1..=100).contains(&hs.homeless_recovery_percent),
+        "housing.homeless_recovery_percent must be 1..=100",
+    )?;
+    let housing = HousingConfig {
+        rent_step: hs.rent_step,
+        rent_min: hs.rent_min,
+        homeless_recovery_percent: hs.homeless_recovery_percent,
+    };
+    let behaviour = parse_behaviour(&f, &traits)?;
     check(
         0 < f.wander.min_minutes && f.wander.min_minutes <= f.wander.max_minutes,
         "wander must satisfy 0 < min_minutes <= max_minutes",
@@ -373,6 +483,9 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
         goods: f.goods.names.clone(),
         food,
         businesses,
+        map,
+        houses,
+        housing,
         market: MarketConfig {
             price_step: m.price_step,
             price_min: m.price_min,
@@ -387,6 +500,7 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
         hunger_critical: h.critical,
         fatigue_per_hour: fa.per_hour,
         sleep_recovery_per_hour: fa.recovery_per_hour,
+        max_sleep_minutes: fa.max_sleep_minutes,
         meal_relief: f.meal.relief,
         meal_minutes: f.meal.minutes,
         work_start_hour: f.work.start_hour,
@@ -398,12 +512,8 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
     })
 }
 
-fn parse_behaviour(
-    actions: &BTreeMap<String, ActionSection>,
-    traits: &[String],
-    reserve_days: i64,
-    meals_per_day: i64,
-) -> Result<Behaviour, ContentError> {
+fn parse_behaviour(f: &WorldFile, traits: &[String]) -> Result<Behaviour, ContentError> {
+    let actions = &f.action;
     let names = variable_names(traits);
     let names: Vec<&str> = names.iter().map(String::as_str).collect();
     let compile = |src: &str, at: String| {
@@ -431,10 +541,20 @@ fn parse_behaviour(
             score: compile(&a.score, at("score"))?,
         });
     }
+    let h = &f.housing;
     Ok(Behaviour {
         actions: rules,
-        safety_reserve_days: reserve_days,
-        meals_per_day,
+        safety_reserve_days: f.needs.safety.reserve_days,
+        meals_per_day: f.needs.safety.meals_per_day,
+        housing: HousingRule {
+            when: h
+                .when
+                .as_deref()
+                .map(|w| compile(w, "housing.when".into()))
+                .transpose()?,
+            score: compile(&h.score, "housing.score".into())?,
+            homeless_score: compile(&h.homeless_score, "housing.homeless_score".into())?,
+        },
     })
 }
 
@@ -477,6 +597,13 @@ mod tests {
             ("score = \"4 * need.hunger\"", "score = \"4 * need.hungry\""),
             ("score = \"4 * need.hunger\"", "score = \"4 *\""),
             ("[action.eat]", "[action.dance]"),
+            ("width = 24", "width = 4"),
+            ("beds = 12", "beds = 0"),
+            (
+                "homeless_recovery_percent = 50",
+                "homeless_recovery_percent = 0",
+            ),
+            ("homeless_score = \"0\"", "homeless_score = \"house.size\""),
             ("recovery_per_hour = 80", "recovery_per_hour = 0"),
             ("min_minutes = 30", "min_minutes = 0"),
             ("food = \"bread\"", "food = \"cake\""),

@@ -11,6 +11,8 @@ food = "bread"
 
 [[business]]
 name = "field"
+x = 3
+y = 4
 output = "grain"
 output_milli_per_worker_hour = 750
 slots = 22
@@ -22,6 +24,8 @@ output_target = 100
 
 [[business]]
 name = "mill"
+x = 12
+y = 4
 output = "flour"
 input = { good = "grain", amount = 1 }
 output_milli_per_worker_hour = 1500
@@ -35,6 +39,8 @@ input_target = 200
 
 [[business]]
 name = "bakery"
+x = 20
+y = 12
 output = "bread"
 input = { good = "flour", amount = 1 }
 output_milli_per_worker_hour = 1500
@@ -52,6 +58,59 @@ price_min = 1
 wage_step = 1
 wage_min = 5
 reserve_days = 3
+
+[map]
+width = 24
+height = 18
+travel_minutes_per_parcel = 2
+land_price_base = 100
+land_price_radius = 5
+
+# 60 beds for 50 agents, some near each workplace, some cheap far out.
+[[house]]
+name = "farmstead"
+x = 2
+y = 6
+beds = 12
+rent = 5
+
+[[house]]
+name = "mill row"
+x = 13
+y = 2
+beds = 12
+rent = 5
+
+[[house]]
+name = "bakers lane"
+x = 21
+y = 14
+beds = 12
+rent = 5
+
+[[house]]
+name = "market court"
+x = 11
+y = 9
+beds = 12
+rent = 5
+
+[[house]]
+name = "outskirts"
+x = 1
+y = 17
+beds = 12
+rent = 5
+
+[housing]
+rent_step = 1
+rent_min = 1
+homeless_recovery_percent = 50
+# Rent for two days in hand; cheap and close beats dear and far; moving
+# needs a real gain.
+when = "money >= house.rent * 2"
+score = "400 - house.rent * 10 - house.distance * 15 + house.current * 30"
+homeless_score = "0"
 
 [traits]
 # Character traits, 0-1000. Formulas read them as trait.<name>.
@@ -71,6 +130,7 @@ critical = 800
 [needs.fatigue]
 per_hour = 40
 recovery_per_hour = 80
+max_sleep_minutes = 600
 
 # Safety: 1000 without savings, 0 once savings pay for reserve_days of meals.
 [needs.safety]

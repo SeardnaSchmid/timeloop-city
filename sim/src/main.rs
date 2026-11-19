@@ -161,6 +161,7 @@ fn run(args: &Args, mut world: World) -> io::Result<()> {
     };
     let mut meals_before = 0;
     let mut work_before = 0;
+    let mut starving_before = 0;
     let mut watched = args
         .world
         .as_ref()
@@ -190,13 +191,13 @@ fn run(args: &Args, mut world: World) -> io::Result<()> {
         if let Some(f) = &mut stats {
             let s = world.stats();
             let work_hours = (s.work_minutes_total - work_before) / 60;
-            writeln!(
-                f,
-                "{}",
-                csv_row(day, &s, s.meals_total - meals_before, work_hours)
-            )?;
+            let agent_minutes = (world.agent_count() as u64 * MINUTES_PER_DAY).max(1);
+            let starving = (s.starving_minutes_total - starving_before) * 1000 / agent_minutes;
+            let meals = s.meals_total - meals_before;
+            writeln!(f, "{}", csv_row(day, &s, meals, work_hours, starving))?;
             meals_before = s.meals_total;
             work_before = s.work_minutes_total;
+            starving_before = s.starving_minutes_total;
         }
         if !args.quiet {
             writeln!(out, "day {day:>6} {:016x}", world.state_hash())?;
@@ -231,13 +232,26 @@ fn csv_header(world: &World) -> String {
             "meals",
             "work_hours",
             "gini_money",
+            "starving_permille",
         ]
         .map(String::from),
     );
+    cols.extend(
+        c.houses
+            .iter()
+            .map(|h| format!("rent_{}", h.name.replace(' ', "_"))),
+    );
+    cols.extend(
+        c.houses
+            .iter()
+            .map(|h| format!("tenants_{}", h.name.replace(' ', "_"))),
+    );
+    cols.extend(["homeless", "commute_centi"].map(String::from));
     cols.join(",")
 }
 
-fn csv_row(day: u64, s: &Stats, meals: u64, work_hours: u64) -> String {
+/// One CSV row; `meals`, `work_hours` and `starving_permille` are for this day.
+fn csv_row(day: u64, s: &Stats, meals: u64, work_hours: u64, starving_permille: u64) -> String {
     let mut cols = vec![
         day.to_string(),
         s.money_agents.to_string(),
@@ -252,6 +266,11 @@ fn csv_row(day: u64, s: &Stats, meals: u64, work_hours: u64) -> String {
     cols.push(meals.to_string());
     cols.push(work_hours.to_string());
     cols.push(s.money_gini_permille.to_string());
+    cols.push(starving_permille.to_string());
+    cols.extend(s.rents.iter().map(i64::to_string));
+    cols.extend(s.tenants.iter().map(u32::to_string));
+    cols.push(s.homeless.to_string());
+    cols.push(s.commute_centi.to_string());
     cols.join(",")
 }
 

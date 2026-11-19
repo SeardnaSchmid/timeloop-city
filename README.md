@@ -5,7 +5,7 @@ Deterministic city simulation in Rust. Architecture and roadmap (German):
 
 | Crate | Contents |
 | --- | --- |
-| `core` | Event queue, lazy needs, utility decisions with an integer formula language, economy (businesses, market), world state, hash-based randomness, state hash |
+| `core` | Event queue, lazy needs, utility decisions with an integer formula language, map and housing, economy (businesses, market), world state, hash-based randomness, state hash |
 | `content` | Game content as TOML (`content/data/`), JSON schema (`content/schema/`) |
 | `sim` | Headless simulator (CLI) |
 
@@ -21,7 +21,8 @@ cargo run --release -p timeloop-sim -- --agents 1 --days 2 --log
 ```
 
 Add `--stats FILE` to write one CSV row per day (money, prices, wages, cash,
-staff, stock, employment, hunger, meals, work hours, money Gini):
+staff, stock, employment, hunger, meals, work hours, money Gini, share of
+time spent starving, rent and tenants per house, homeless, mean commute):
 
 ```bash
 cargo run --release -p timeloop-sim -- --days 3650 --stats stats.csv --quiet
@@ -37,6 +38,15 @@ wins. To see why an agent does what it does:
 cargo run --release -p timeloop-sim -- explain 7 3:08:00
 ```
 
+The town is a grid (`[map]`). Every business and `[[house]]` stands on one
+parcel; walking takes `travel_minutes_per_parcel` per parcel of Manhattan
+distance, and work and sleep happen at the workplace and at home. Houses rent
+out beds by the day; the rent rises when a full house turns people away and
+falls while beds stay empty. Once a day every agent scores the houses with a
+free bed against its own and against staying homeless (`[housing]` formulas),
+so people move closer to work when it pays. Without a home, sleep recovers at
+half the rate.
+
 With `--world FILE --watch` the rules are reloaded whenever the file changes,
 so behaviour can be tuned while a long run is going.
 
@@ -44,7 +54,8 @@ The default world is a bread town: field -> mill -> bakery, 50 agents. Money is
 a closed loop (never created or destroyed); prices and wages move in fixed daily
 steps. `sim/tests/bread_town.rs` checks that ten years stay fed and balanced;
 `sim/tests/traits.rs` checks that diligent and easygoing populations work
-different hours and end up with different wealth.
+different hours and end up with different wealth; `sim/tests/city.rs` checks
+that rents and vacancy settle and commutes get shorter.
 
 `content/data/world.toml` points at its schema, so editors with TOML schema
 support (Taplo / Even Better TOML) autocomplete and validate it. After changing

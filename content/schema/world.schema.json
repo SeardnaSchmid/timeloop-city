@@ -21,6 +21,19 @@
     "goods": {
       "$ref": "#/$defs/GoodsSection"
     },
+    "house": {
+      "description": "Houses in ID order. Each rents out beds by the day.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/HouseSection"
+      }
+    },
+    "housing": {
+      "$ref": "#/$defs/HousingSection"
+    },
+    "map": {
+      "$ref": "#/$defs/MapSection"
+    },
     "market": {
       "$ref": "#/$defs/MarketSection"
     },
@@ -56,6 +69,9 @@
     "goods",
     "business",
     "market",
+    "map",
+    "house",
+    "housing",
     "traits",
     "population",
     "needs",
@@ -153,11 +169,26 @@
           "description": "Starting wage per worker-hour.",
           "type": "integer",
           "format": "int64"
+        },
+        "x": {
+          "description": "Parcel the business stands on.",
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "y": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
         }
       },
       "additionalProperties": false,
       "required": [
         "name",
+        "x",
+        "y",
         "output",
         "output_milli_per_worker_hour",
         "slots",
@@ -170,6 +201,12 @@
     "FatigueSection": {
       "type": "object",
       "properties": {
+        "max_sleep_minutes": {
+          "description": "Longest sleep in minutes; agents get up then even if not rested.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
         "per_hour": {
           "type": "integer",
           "format": "uint32",
@@ -184,7 +221,8 @@
       "additionalProperties": false,
       "required": [
         "per_hour",
-        "recovery_per_hour"
+        "recovery_per_hour",
+        "max_sleep_minutes"
       ]
     },
     "GoodsSection": {
@@ -206,6 +244,87 @@
       "required": [
         "names",
         "food"
+      ]
+    },
+    "HouseSection": {
+      "type": "object",
+      "properties": {
+        "beds": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "name": {
+          "type": "string"
+        },
+        "rent": {
+          "description": "Starting rent per bed and day.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "x": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "y": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "x",
+        "y",
+        "beds",
+        "rent"
+      ]
+    },
+    "HousingSection": {
+      "description": "Once a day every agent scores each house it could move into (or its own)\nagainst staying homeless and takes the best. Formulas see the action\nvariables plus `house.rent`, `house.distance` (to work, or the town centre\nwhen unemployed) and `house.current` (1 for its own home).",
+      "type": "object",
+      "properties": {
+        "homeless_recovery_percent": {
+          "description": "Sleep recovery without a home, in percent of the normal rate.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "homeless_score": {
+          "description": "Score of having no home.",
+          "type": "string"
+        },
+        "rent_min": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "rent_step": {
+          "description": "Daily rent change: up when full and someone was turned away, down when beds stay free.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "score": {
+          "type": "string"
+        },
+        "when": {
+          "description": "The house is an option when this is > 0.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "rent_step",
+        "rent_min",
+        "homeless_recovery_percent",
+        "score",
+        "homeless_score"
       ]
     },
     "HungerSection": {
@@ -245,6 +364,50 @@
       "required": [
         "good",
         "amount"
+      ]
+    },
+    "MapSection": {
+      "type": "object",
+      "properties": {
+        "height": {
+          "description": "Parcels down; y runs 0..height.",
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "land_price_base": {
+          "description": "Land price of a parcel far from any house.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "land_price_radius": {
+          "description": "Houses closer than this raise the land price around them by their rent.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "travel_minutes_per_parcel": {
+          "description": "Walking time per parcel (Manhattan distance).",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "width": {
+          "description": "Parcels across; x runs 0..width.",
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height",
+        "travel_minutes_per_parcel",
+        "land_price_base",
+        "land_price_radius"
       ]
     },
     "MarketSection": {

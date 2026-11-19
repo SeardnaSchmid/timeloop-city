@@ -5,6 +5,7 @@
 //! recipes without inputs (the field) and leave it when eaten.
 
 use crate::hash::StateHasher;
+use crate::map::Pos;
 
 pub type GoodId = u32;
 pub type BusinessId = u32;
@@ -18,6 +19,8 @@ pub struct RecipeInput {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BusinessConfig {
     pub name: String,
+    /// Parcel the business stands on; its workers work here.
+    pub pos: Pos,
     pub output: GoodId,
     pub input: Option<RecipeInput>,
     /// Output per worker-hour, in thousandths of a unit.
@@ -325,6 +328,7 @@ pub(crate) mod tests {
     pub(crate) fn chain() -> Vec<BusinessConfig> {
         let b = |name: &str, output, input, rate, slots, price| BusinessConfig {
             name: name.into(),
+            pos: Pos::default(),
             output,
             input,
             output_milli_per_worker_hour: rate,

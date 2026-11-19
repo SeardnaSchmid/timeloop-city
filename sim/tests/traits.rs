@@ -1,5 +1,8 @@
 //! Iteration 3 acceptance: populations with different character traits work
 //! measurably different hours and end up with a different wealth distribution.
+//!
+//! The town-wide Gini is printed but not checked: since the map (iteration
+//! 3b), location, rent and unemployment make identical agents unequal too.
 
 use timeloop_core::{Population, World, WorldConfig, MINUTES_PER_DAY};
 
@@ -22,7 +25,8 @@ fn world_with(populations: Vec<Population>) -> WorldConfig {
     c
 }
 
-/// Per population: (work minutes per agent and day after warm-up, mean money at the end).
+/// Per population: (work minutes per agent and day after warm-up, mean money
+/// at the end), and the money Gini averaged over the days after warm-up.
 fn run(seed: u64, config: WorldConfig) -> (Vec<(u64, i64)>, u32) {
     let groups = config.populations.len();
     let mut world = World::new(seed, config);
@@ -30,7 +34,12 @@ fn run(seed: u64, config: WorldConfig) -> (Vec<(u64, i64)>, u32) {
     let start: Vec<u64> = (0..world.agent_count())
         .map(|a| world.work_minutes(a))
         .collect();
-    world.run_until(DAYS * MINUTES_PER_DAY, &mut |_| {});
+    let mut gini = 0u64;
+    for day in WARMUP + 1..=DAYS {
+        world.run_until(day * MINUTES_PER_DAY, &mut |_| {});
+        gini += world.stats().money_gini_permille as u64;
+    }
+    let gini = (gini / (DAYS - WARMUP)) as u32;
 
     let mut minutes = vec![0u64; groups];
     let mut money = vec![0i64; groups];
@@ -47,7 +56,7 @@ fn run(seed: u64, config: WorldConfig) -> (Vec<(u64, i64)>, u32) {
             (per_day, money[p] / count[p] as i64)
         })
         .collect();
-    (per_group, world.stats().money_gini_permille)
+    (per_group, gini)
 }
 
 #[test]
@@ -78,10 +87,6 @@ fn traits_change_work_hours_and_wealth() {
         assert!(
             money_d > money_e * 3 / 2,
             "seed {seed}: diligent money {money_d} vs easygoing {money_e}"
-        );
-        assert!(
-            gini_mixed > gini_alike + 50,
-            "seed {seed}: gini mixed {gini_mixed} vs alike {gini_alike}"
         );
     }
 }
