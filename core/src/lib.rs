@@ -19,15 +19,15 @@ pub mod world;
 
 pub use assoc::{AssocKind, AssociationConfig, Rule, RuleKind, ASSOC_VARS, WEEK_DAYS};
 pub use behaviour::{
-    variable_names, ActionRule, Allowed, Behaviour, Candidate, Explanation, FoundingRule,
-    HousingRule, Population, BASE_VARS, MAX_TRAITS,
+    variable_names, ActionRule, Allowed, Behaviour, BuildingRule, Candidate, Explanation,
+    FoundingRule, HousingRule, Population, BASE_VARS, MAX_TRAITS,
 };
 pub use career::CareerConfig;
 pub use economy::{BusinessConfig, BusinessId, Economy, GoodId, MarketConfig, RecipeInput};
 pub use formula::{Formula, FormulaError};
 pub use hash::{StateHash, StateHasher};
 pub use housing::{HouseConfig, Housing, HousingConfig};
-pub use life::{LifeConfig, Stage, DAYS_PER_YEAR};
+pub use life::{GrowthConfig, LifeConfig, Stage, DAYS_PER_YEAR};
 pub use map::{Building, HouseId, Map, MapConfig, Pos};
 pub use needs::{LazyNeed, NEED_MAX};
 pub use world::{

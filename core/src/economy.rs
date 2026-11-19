@@ -13,7 +13,8 @@ use crate::map::Pos;
 pub type GoodId = u32;
 pub type BusinessId = u32;
 
-const NO_OWNER: u32 = u32::MAX;
+/// Owner of town businesses.
+pub const NO_OWNER: u32 = u32::MAX;
 
 /// A business stores at most this many times its output target; labour
 /// beyond that is lost.
@@ -79,8 +80,11 @@ pub struct Economy {
     open: Vec<bool>,
     /// Day the business opened.
     opened_day: Vec<u64>,
-    /// Days in a row the business started without a day's payroll in cash.
+    /// Days in a row the business started without a day's payroll in cash
+    /// and without having sold anything the day before.
     broke_days: Vec<u32>,
+    /// Units sold on the previous day.
+    sold_yesterday: Vec<u32>,
     /// Per good: how often it ran short lately, 0-1000 (smoothed daily).
     short_recent: Vec<u32>,
     /// Money taken in from sales since it was last read (for dues).
@@ -113,6 +117,7 @@ impl Economy {
             open: vec![true; n],
             opened_day: vec![0; n],
             broke_days: vec![0; n],
+            sold_yesterday: vec![0; n],
             short_recent: vec![0; goods],
             revenue: vec![0; n],
             price_bounds: vec![(0, i64::MAX); goods],
@@ -140,6 +145,7 @@ impl Economy {
                 self.open.push(false);
                 self.opened_day.push(0);
                 self.broke_days.push(0);
+                self.sold_yesterday.push(0);
                 self.revenue.push(0);
                 self.config.len() - 1
             }
@@ -157,6 +163,7 @@ impl Economy {
         self.open[b] = true;
         self.opened_day[b] = day;
         self.broke_days[b] = 0;
+        self.sold_yesterday[b] = 0;
         self.revenue[b] = 0;
         self.config[b] = config;
         b as BusinessId
@@ -205,12 +212,14 @@ impl Economy {
         (0..self.len()).filter(move |&b| self.open[b as usize] && self.config(b).output == good)
     }
 
-    /// Once a day: counts days without a day's payroll in cash.
+    /// Once a day, after prices: counts days without a day's payroll in
+    /// cash and without sales the day before.
     pub fn update_broke_days(&mut self, work_hours: i64) {
         for b in 0..self.len() {
             let i = b as usize;
             let payroll = self.payroll_per_day(b, self.workers[i].max(1), work_hours);
-            self.broke_days[i] = if self.open[i] && self.cash[i] < payroll {
+            let broke = self.cash[i] < payroll && self.sold_yesterday[i] == 0;
+            self.broke_days[i] = if self.open[i] && broke {
                 self.broke_days[i] + 1
             } else {
                 0
@@ -431,7 +440,9 @@ impl Economy {
         let step = m.price_change_percent.clamp(1, 100) * 10;
         for b in 0..self.len() {
             let i = b as usize;
-            let sold = std::mem::take(&mut self.sold_today[i]) as i64;
+            let sold = std::mem::take(&mut self.sold_today[i]);
+            self.sold_yesterday[i] = sold;
+            let sold = sold as i64;
             if !self.open[i] {
                 continue;
             }
@@ -523,6 +534,7 @@ impl Economy {
         self.open.iter().for_each(|&o| h.write_bytes(&[o as u8]));
         self.opened_day.iter().for_each(|&d| h.write_u64(d));
         h.write_u32_slice(&self.broke_days);
+        h.write_u32_slice(&self.sold_yesterday);
         h.write_u32_slice(&self.short_recent);
         h.write_i64_slice(&self.revenue);
         for &(lo, hi) in &self.price_bounds {

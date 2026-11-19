@@ -348,6 +348,11 @@ fn csv_header(world: &World) -> String {
             "retired",
             "price_index",
             "mean_level_tenths",
+            "population",
+            "immigrants",
+            "beds",
+            "houses_built",
+            "comforts",
         ]
         .map(String::from),
     );
@@ -385,8 +390,10 @@ fn csv_row(
     cols.push(work_hours.to_string());
     cols.push(s.money_gini_permille.to_string());
     cols.push(starving_permille.to_string());
-    cols.extend(s.rents.iter().map(i64::to_string));
-    cols.extend(s.tenants.iter().map(u32::to_string));
+    // Per-house columns cover the town's houses; built ones are in the totals.
+    let houses = s.rents.len() - s.houses_built_total as usize;
+    cols.extend(s.rents[..houses].iter().map(i64::to_string));
+    cols.extend(s.tenants[..houses].iter().map(u32::to_string));
     cols.push(s.homeless.to_string());
     cols.push(s.commute_centi.to_string());
     cols.push(s.firms.to_string());
@@ -397,6 +404,16 @@ fn csv_row(
     cols.extend([s.mean_age, s.in_education, s.retired].map(|v| v.to_string()));
     cols.push(s.price_index.to_string());
     cols.push(s.mean_level_tenths.to_string());
+    cols.extend(
+        [
+            (s.employed + s.unemployed) as u64,
+            s.immigrants_total,
+            s.beds as u64,
+            s.houses_built_total,
+            s.comforts_total,
+        ]
+        .map(|v| v.to_string()),
+    );
     cols.extend(s.assoc_cash.iter().map(i64::to_string));
     cols.join(",")
 }

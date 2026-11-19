@@ -17,11 +17,16 @@ pub const MAX_TRAITS: usize = 16;
 /// The `market.*` variables describe the good a founder considers making
 /// (0 outside the founding rule; `market.fee` is what associations charge
 /// for founding); `firm.*` describe the firm the agent
-/// owns (0 without one), except `firm.capital`, the cost of founding one.
+/// runs as CEO (0 without one), except `firm.capital`, the cost of founding
+/// one, and `owns_firm`, how many open firms the agent owns.
+/// `housing.*` describe the whole town for the building rule (0 elsewhere):
+/// free beds (counting houses under construction), homeless people, people turned away by full
+/// houses yesterday and the mean rent; `building.cost` is what a new house
+/// costs.
 /// `level` is the agent's level in the profession of its job (0 without);
 /// `age` is in years; `in_education` and `retired` are 0 or 1 (always 0
 /// without a life course in the world file).
-pub const BASE_VARS: [&str; 31] = [
+pub const BASE_VARS: [&str; 36] = [
     "need.hunger",
     "need.fatigue",
     "need.safety",
@@ -53,12 +58,19 @@ pub const BASE_VARS: [&str; 31] = [
     "retired",
     "market.fee",
     "level",
+    "housing.free_beds",
+    "housing.homeless",
+    "housing.wanted",
+    "housing.rent",
+    "building.cost",
 ];
 
 pub const MAX_VARS: usize = BASE_VARS.len() + MAX_TRAITS;
 
 /// Indices into the variable table.
 pub(crate) mod var {
+    // The full table, also the entries no code reads by name.
+    #![allow(dead_code)]
     pub const HUNGER: usize = 0;
     pub const FATIGUE: usize = 1;
     pub const SAFETY: usize = 2;
@@ -76,11 +88,8 @@ pub(crate) mod var {
     pub const HOUSE_DISTANCE: usize = 14;
     pub const HOUSE_CURRENT: usize = 15;
     pub const MARKET_PRICE: usize = 16;
-    #[allow(dead_code)]
     pub const MARKET_COST: usize = 17;
-    #[allow(dead_code)]
     pub const MARKET_SHORTAGE: usize = 18;
-    #[allow(dead_code)]
     pub const MARKET_FIRMS: usize = 19;
     pub const MARKET_NEWEST_DAYS: usize = 20;
     pub const FIRM_CAPITAL: usize = 21;
@@ -93,7 +102,12 @@ pub(crate) mod var {
     pub const RETIRED: usize = 28;
     pub const MARKET_FEE: usize = 29;
     pub const LEVEL: usize = 30;
-    pub const TRAITS: usize = 31;
+    pub const HOUSING_FREE_BEDS: usize = 31;
+    pub const HOUSING_HOMELESS: usize = 32;
+    pub const HOUSING_WANTED: usize = 33;
+    pub const HOUSING_RENT: usize = 34;
+    pub const BUILDING_COST: usize = 35;
+    pub const TRAITS: usize = 36;
 }
 
 /// All variable names for the given traits, in table order.
@@ -141,6 +155,26 @@ pub struct Behaviour {
     pub housing: HousingRule,
     /// Agents founding and closing firms; `None`: only the town's businesses.
     pub founding: Option<FoundingRule>,
+    /// Agents building houses; `None`: only the town's houses.
+    pub building: Option<BuildingRule>,
+}
+
+/// Once a day every agent may score building a house; the best allowed one
+/// is built. The builder pays `cost` to the town (land and permit; there
+/// are no building firms yet), the house stands at once but takes
+/// `construction_days` before anyone can move in. Its rent goes to the
+/// owner, after the profit tax of `[founding]`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuildingRule {
+    /// Building is an option when this is > 0.
+    pub when: Option<Formula>,
+    pub score: Formula,
+    pub cost: i64,
+    pub beds: u32,
+    pub start_rent: i64,
+    pub construction_days: u64,
+    /// Houses built by agents at most.
+    pub max_houses: u32,
 }
 
 /// Once a day every agent without a firm scores founding one for each good

@@ -9,10 +9,10 @@ use std::{collections::BTreeMap, fmt, fs, path::Path};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use timeloop_core::{
-    variable_names, ActionKind, ActionRule, AssocKind, AssociationConfig, Behaviour,
-    BusinessConfig, CareerConfig, Formula, FoundingRule, GoodId, HouseConfig, HousingConfig,
-    HousingRule, LifeConfig, MapConfig, MarketConfig, Population, Pos, RecipeInput, Rule, RuleKind,
-    WorldConfig, ASSOC_VARS, MAX_TRAITS, NEED_MAX,
+    variable_names, ActionKind, ActionRule, AssocKind, AssociationConfig, Behaviour, BuildingRule,
+    BusinessConfig, CareerConfig, Formula, FoundingRule, GoodId, GrowthConfig, HouseConfig,
+    HousingConfig, HousingRule, LifeConfig, MapConfig, MarketConfig, Population, Pos, RecipeInput,
+    Rule, RuleKind, WorldConfig, ASSOC_VARS, MAX_TRAITS, NEED_MAX,
 };
 
 /// The bundled default world.
@@ -27,6 +27,9 @@ pub struct WorldFile {
     goods: GoodsSection,
     /// Businesses in ID order. Order matters: ties go to the lower ID.
     business: Vec<BusinessSection>,
+    /// Blueprints for kinds of business nobody runs at the start.
+    #[serde(default)]
+    recipe: Vec<RecipeSection>,
     market: MarketSection,
     map: MapSection,
     /// Houses in ID order. Each rents out beds by the day.
@@ -35,6 +38,8 @@ pub struct WorldFile {
     /// Agents founding firms. Without this section only the businesses
     /// above exist.
     founding: Option<FoundingSection>,
+    /// Agents building houses. Without this section only the houses above exist.
+    building: Option<BuildingSection>,
     traits: TraitsSection,
     /// Agent groups; agents are split over them in ID order, by weight.
     population: Vec<PopulationSection>,
@@ -46,6 +51,8 @@ pub struct WorldFile {
     association: Vec<AssociationSection>,
     /// Professions with levels. Without it everyone works alike.
     career: Option<CareerSection>,
+    /// Newcomers when work is left over. Without it the town keeps its size.
+    growth: Option<GrowthSection>,
     needs: NeedsSection,
     meal: MealSection,
     work: WorkSection,
@@ -189,6 +196,36 @@ struct CareerSection {
     max_level: u32,
 }
 
+/// When businesses want to hire and nobody is looking for work, newcomers
+/// of working age arrive (no money, no home) and are hired the same day.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct GrowthSection {
+    max_agents: u32,
+    arrivals_per_day: u32,
+}
+
+/// Once a day every agent with `cost` in cash may score building a house;
+/// the best allowed one is built near where people work. The cost goes to
+/// the town (land and permit), the house takes `construction_days` before
+/// anyone moves in and its rent goes to the builder after the profit tax.
+/// Formulas see the action variables plus `housing.free_beds`,
+/// `housing.homeless`, `housing.wanted` (turned away by full houses
+/// yesterday), `housing.rent` (mean) and `building.cost`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct BuildingSection {
+    cost: i64,
+    beds: u32,
+    /// Starting rent; at least the town's mean rent.
+    rent: i64,
+    construction_days: u64,
+    /// Houses built by agents at most.
+    max_houses: u32,
+    when: Option<String>,
+    score: String,
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct TraitsSection {
@@ -237,6 +274,10 @@ struct GoodsSection {
     names: Vec<String>,
     /// The good agents buy and eat.
     food: String,
+    /// Goods agents buy with their comfort budget (`needs.comfort`). Without
+    /// any, the comfort budget goes to the town.
+    #[serde(default)]
+    comfort: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -266,6 +307,26 @@ struct BusinessSection {
     /// Output stock the business aims for. Below it the price rises, above twice it falls.
     output_target: u32,
     /// Input stock the business restocks to every morning.
+    #[serde(default)]
+    input_target: u32,
+}
+
+/// A blueprint for a kind of business nobody runs at the start. Founders
+/// open it when its good is short and sells well (`[founding]`).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RecipeSection {
+    name: String,
+    output: String,
+    input: Option<InputSection>,
+    /// Output per worker-hour in thousandths of a unit.
+    output_milli_per_worker_hour: u32,
+    slots: u32,
+    /// Opening price while nobody else sells the good.
+    price: i64,
+    /// Opening wage per worker-hour.
+    wage: i64,
+    output_target: u32,
     #[serde(default)]
     input_target: u32,
 }
@@ -438,13 +499,55 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
             input_target: b.input_target,
         });
     }
-    for b in &businesses {
+    let mut recipes = Vec::new();
+    for r in &f.recipe {
+        let at = |field: &str| format!("recipe \"{}\".{field}", r.name);
+        let input = match &r.input {
+            Some(i) => {
+                check(i.amount > 0, format!("{} must be > 0", at("input.amount")))?;
+                Some(RecipeInput {
+                    good: good_id(&i.good, &at("input.good"))?,
+                    amount: i.amount,
+                })
+            }
+            None => None,
+        };
+        check(r.slots > 0, format!("{} must be > 0", at("slots")))?;
+        check(r.price > 0, format!("{} must be > 0", at("price")))?;
+        recipes.push(BusinessConfig {
+            name: r.name.clone(),
+            pos: Pos::default(),
+            output: good_id(&r.output, &at("output"))?,
+            input,
+            output_milli_per_worker_hour: r.output_milli_per_worker_hour,
+            slots: r.slots,
+            start_cash: 0,
+            start_price: r.price,
+            start_wage: r.wage,
+            start_stock: 0,
+            output_target: r.output_target,
+            input_target: r.input_target,
+        });
+    }
+    for b in businesses.iter().chain(&recipes) {
         if let Some(input) = b.input {
             check(
-                businesses.iter().any(|s| s.output == input.good),
-                format!("business \"{}\": nobody produces its input", b.name),
+                businesses
+                    .iter()
+                    .chain(&recipes)
+                    .any(|s| s.output == input.good),
+                format!("\"{}\": nobody produces its input", b.name),
             )?;
         }
+    }
+    let mut comfort_goods = Vec::new();
+    for g in &f.goods.comfort {
+        let id = good_id(g, "goods.comfort")?;
+        check(
+            businesses.iter().chain(&recipes).any(|b| b.output == id),
+            format!("goods.comfort: nobody can make {g}"),
+        )?;
+        comfort_goods.push(id);
     }
     check(
         businesses.iter().any(|b| b.output == food),
@@ -678,6 +781,8 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
         goods: f.goods.names.clone(),
         food,
         businesses,
+        recipes,
+        comfort_goods,
         map,
         houses,
         housing,
@@ -701,6 +806,19 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
             wage_per_level_permille: c.wage_per_level_permille,
             max_level: c.max_level,
         }),
+        growth: match &f.growth {
+            None => None,
+            Some(g) => {
+                check(
+                    g.max_agents >= f.world.agents,
+                    "growth.max_agents must be >= world.agents",
+                )?;
+                Some(GrowthConfig {
+                    max_agents: g.max_agents,
+                    arrivals_per_day: g.arrivals_per_day,
+                })
+            }
+        },
         hunger_per_hour: h.per_hour,
         hunger_critical: h.critical,
         fatigue_per_hour: fa.per_hour,
@@ -769,6 +887,28 @@ fn parse_behaviour(f: &WorldFile, traits: &[String]) -> Result<Behaviour, Conten
                 .transpose()?,
             score: compile(&h.score, "housing.score".into())?,
             homeless_score: compile(&h.homeless_score, "housing.homeless_score".into())?,
+        },
+        building: match &f.building {
+            None => None,
+            Some(b) => {
+                check(
+                    b.cost > 0 && b.beds > 0,
+                    "building: cost and beds must be > 0",
+                )?;
+                Some(BuildingRule {
+                    when: b
+                        .when
+                        .as_deref()
+                        .map(|w| compile(w, "building.when".into()))
+                        .transpose()?,
+                    score: compile(&b.score, "building.score".into())?,
+                    cost: b.cost,
+                    beds: b.beds,
+                    start_rent: b.rent,
+                    construction_days: b.construction_days,
+                    max_houses: b.max_houses,
+                })
+            }
         },
         founding: match &f.founding {
             None => None,

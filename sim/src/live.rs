@@ -211,9 +211,35 @@ impl Live {
                 e.opened_day(b)
             );
         }
+        // Houses as agents build them: owner -1 is the town.
+        t.push_str("],\"houses\":[");
+        let hs = w.housing();
+        for h in 0..hs.len() {
+            let sep = if h > 0 { "," } else { "" };
+            let hc = hs.config(h);
+            let _ = write!(
+                t,
+                "{sep}{{\"name\":{},\"x\":{},\"y\":{},\"beds\":{},\"owner\":{},\"building\":{}}}",
+                json_string(&hc.name),
+                hc.pos.x,
+                hc.pos.y,
+                hc.beds,
+                hs.owner(h).map_or(-1, |o| o as i64),
+                hs.under_construction(h)
+            );
+        }
         let _ = write!(
             t,
-            "],\"rent\":{:?},\"tenants\":{:?},\"firms\":{},\"deaths\":{},\"births\":{},\
+            "],\"population\":{},\"immigrants\":{},\"housesBuilt\":{},\"comforts\":{},\"beds\":{}",
+            w.agent_count(),
+            s.immigrants_total,
+            s.houses_built_total,
+            s.comforts_total,
+            s.beds
+        );
+        let _ = write!(
+            t,
+            ",\"rent\":{:?},\"tenants\":{:?},\"firms\":{},\"deaths\":{},\"births\":{},\
              \"newcomers\":{},\"meanAge\":{},\"inEducation\":{},\"retired\":{},",
             s.rents,
             s.tenants,

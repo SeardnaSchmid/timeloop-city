@@ -37,5 +37,10 @@ fn eighty_years_of_generations() {
         "most places go to children"
     );
     assert!((30..=60).contains(&s.mean_age), "mean age {}", s.mean_age);
-    assert!(s.retired < 20, "{} retired", s.retired);
+    let people = w.agent_count();
+    assert!(
+        s.retired * 100 < 35 * people,
+        "{} of {people} retired",
+        s.retired
+    );
 }

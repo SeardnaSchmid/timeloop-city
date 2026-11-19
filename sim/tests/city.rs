@@ -9,7 +9,11 @@ const DAYS: u64 = 10 * YEAR;
 #[test]
 fn rents_settle_and_people_move_closer_to_work() {
     for seed in [1, 2, 3] {
-        let mut world = World::new(seed, timeloop_content::default_world());
+        // A town of fixed size and houses, so rents per house compare.
+        let mut config = timeloop_content::default_world();
+        config.growth = None;
+        config.behaviour.building = None;
+        let mut world = World::new(seed, config);
         let houses = world.housing().len() as usize;
         let beds = world.housing().total_beds() as u64;
 

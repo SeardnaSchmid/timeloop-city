@@ -18,6 +18,17 @@
         "$ref": "#/$defs/AssociationSection"
       }
     },
+    "building": {
+      "description": "Agents building houses. Without this section only the houses above exist.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BuildingSection"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "business": {
       "description": "Businesses in ID order. Order matters: ties go to the lower ID.",
       "type": "array",
@@ -49,6 +60,17 @@
     },
     "goods": {
       "$ref": "#/$defs/GoodsSection"
+    },
+    "growth": {
+      "description": "Newcomers when work is left over. Without it the town keeps its size.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GrowthSection"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "house": {
       "description": "Houses in ID order. Each rents out beds by the day.",
@@ -88,6 +110,13 @@
       "type": "array",
       "items": {
         "$ref": "#/$defs/PopulationSection"
+      }
+    },
+    "recipe": {
+      "description": "Blueprints for kinds of business nobody runs at the start.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RecipeSection"
       }
     },
     "traits": {
@@ -170,6 +199,55 @@
       "additionalProperties": false,
       "required": [
         "name"
+      ]
+    },
+    "BuildingSection": {
+      "description": "Once a day every agent with `cost` in cash may score building a house;\nthe best allowed one is built near where people work. The cost goes to\nthe town (land and permit), the house takes `construction_days` before\nanyone moves in and its rent goes to the builder after the profit tax.\nFormulas see the action variables plus `housing.free_beds`,\n`housing.homeless`, `housing.wanted` (turned away by full houses\nyesterday), `housing.rent` (mean) and `building.cost`.",
+      "type": "object",
+      "properties": {
+        "beds": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "construction_days": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "cost": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "max_houses": {
+          "description": "Houses built by agents at most.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "rent": {
+          "description": "Starting rent; at least the town's mean rent.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "score": {
+          "type": "string"
+        },
+        "when": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "cost",
+        "beds",
+        "rent",
+        "construction_days",
+        "max_houses",
+        "score"
       ]
     },
     "BusinessSection": {
@@ -404,6 +482,14 @@
     "GoodsSection": {
       "type": "object",
       "properties": {
+        "comfort": {
+          "description": "Goods agents buy with their comfort budget (`needs.comfort`). Without\nany, the comfort budget goes to the town.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
         "food": {
           "description": "The good agents buy and eat.",
           "type": "string"
@@ -420,6 +506,27 @@
       "required": [
         "names",
         "food"
+      ]
+    },
+    "GrowthSection": {
+      "description": "When businesses want to hire and nobody is looking for work, newcomers\nof working age arrive (no money, no home) and are hired the same day.",
+      "type": "object",
+      "properties": {
+        "arrivals_per_day": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_agents": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "max_agents",
+        "arrivals_per_day"
       ]
     },
     "HouseSection": {
@@ -790,6 +897,70 @@
       "required": [
         "name",
         "weight"
+      ]
+    },
+    "RecipeSection": {
+      "description": "A blueprint for a kind of business nobody runs at the start. Founders\nopen it when its good is short and sells well (`[founding]`).",
+      "type": "object",
+      "properties": {
+        "input": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InputSection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input_target": {
+          "type": "integer",
+          "format": "uint32",
+          "default": 0,
+          "minimum": 0
+        },
+        "name": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "output_milli_per_worker_hour": {
+          "description": "Output per worker-hour in thousandths of a unit.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "output_target": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "price": {
+          "description": "Opening price while nobody else sells the good.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "slots": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "wage": {
+          "description": "Opening wage per worker-hour.",
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "output",
+        "output_milli_per_worker_hour",
+        "slots",
+        "price",
+        "wage",
+        "output_target"
       ]
     },
     "SafetySection": {

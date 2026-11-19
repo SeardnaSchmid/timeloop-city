@@ -22,6 +22,8 @@ fn world_with(populations: Vec<Population>) -> WorldConfig {
     let mut c = timeloop_content::default_world();
     assert_eq!(c.traits, ["greed", "work_life"]);
     c.populations = populations;
+    // A fixed town: newcomers would blur the populations' shares.
+    c.growth = None;
     c
 }
 

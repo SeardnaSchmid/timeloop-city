@@ -37,6 +37,15 @@ pub struct LifeConfig {
     pub inheritance_tax_percent: u32,
 }
 
+/// Newcomers when the town has had work nobody takes for a week and a free bed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GrowthConfig {
+    /// The town never grows beyond this many people.
+    pub max_agents: u32,
+    /// At most this many arrive per day.
+    pub arrivals_per_day: u32,
+}
+
 /// Where in life an agent is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {

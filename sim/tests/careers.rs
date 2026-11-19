@@ -65,9 +65,10 @@ fn experience_pays_and_prices_settle() {
         "daily price change {swing}‰, starving {starving}‰, savings {money_low} vs {money_high}"
     );
     // Single snapshots are noisy (a pensioner's savings, a comfort spree);
-    // over all seeds the experienced half has clearly more.
+    // over all seeds the experienced half has clearly more, even though
+    // poor relief (iteration 5c) levies savings above the safety reserve.
     assert!(
-        money_high * 100 >= money_low * 125,
+        money_high * 100 >= money_low * 115,
         "experience does not pay"
     );
     // Fixed ±1 steps made prices swing by about 9 % a day on average.

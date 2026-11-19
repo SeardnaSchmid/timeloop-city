@@ -11,10 +11,10 @@ use std::fmt;
 use crate::assoc::{avar, AssocKind, AssociationConfig, RuleKind, ASSOC_VARS, WEEK_DAYS};
 use crate::behaviour::{var, Allowed, Behaviour, Candidate, Explanation, Population, MAX_VARS};
 use crate::career::{self, CareerConfig};
-use crate::economy::{BusinessConfig, BusinessId, Economy, GoodId, MarketConfig};
+use crate::economy::{BusinessConfig, BusinessId, Economy, GoodId, MarketConfig, NO_OWNER};
 use crate::hash::{StateHash, StateHasher};
 use crate::housing::{HouseConfig, Housing, HousingConfig};
-use crate::life::{self, LifeConfig, Stage, DAYS_PER_YEAR};
+use crate::life::{self, GrowthConfig, LifeConfig, Stage, DAYS_PER_YEAR};
 use crate::map::{Building, HouseId, Map, MapConfig, Pos};
 use crate::needs::{LazyNeed, NEED_MAX};
 use crate::queue::{Event, EventQueue};
@@ -47,6 +47,10 @@ pub struct WorldConfig {
     /// The good agents eat.
     pub food: GoodId,
     pub businesses: Vec<BusinessConfig>,
+    /// Blueprints for goods no town business makes; founders can open them.
+    pub recipes: Vec<BusinessConfig>,
+    /// Goods agents buy with their comfort budget, in buying order.
+    pub comfort_goods: Vec<GoodId>,
     pub market: MarketConfig,
 
     pub map: MapConfig,
@@ -64,6 +68,8 @@ pub struct WorldConfig {
     pub associations: Vec<AssociationConfig>,
     /// Professions with levels; `None`: everyone works alike.
     pub career: Option<CareerConfig>,
+    /// Newcomers when work is left over; `None`: the town keeps its size.
+    pub growth: Option<GrowthConfig>,
 
     pub hunger_per_hour: u32,
     /// Hunger at which a running action is interrupted to go eat.
@@ -91,6 +97,23 @@ pub struct WorldConfig {
 impl WorldConfig {
     pub fn work_hours(&self) -> i64 {
         (self.work_end_hour - self.work_start_hour) as i64
+    }
+
+    /// Town businesses, then recipes: what blueprint keys index.
+    pub fn blueprint(&self, k: usize) -> &BusinessConfig {
+        match self.businesses.get(k) {
+            Some(b) => b,
+            None => &self.recipes[k - self.businesses.len()],
+        }
+    }
+
+    /// Blueprint keys founders choose from: the first town business making
+    /// each good, then the first recipe for each good no business makes.
+    pub fn blueprints(&self) -> Vec<usize> {
+        let all: Vec<&BusinessConfig> = self.businesses.iter().chain(&self.recipes).collect();
+        (0..all.len())
+            .filter(|&k| all[..k].iter().all(|o| o.output != all[k].output))
+            .collect()
     }
 }
 
@@ -167,6 +190,8 @@ pub enum HomeChange {
     MovedOut,
     /// Could not pay the rent.
     Evicted,
+    /// Started building a new house.
+    Built,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -307,6 +332,7 @@ impl fmt::Display for LogEntry {
                     HomeChange::MovedIn => "moved into",
                     HomeChange::MovedOut => "moved out of",
                     HomeChange::Evicted => "evicted from",
+                    HomeChange::Built => "started building",
                 };
                 write!(f, "{} a{agent} {what} h{house}", clock(at))
             }
@@ -403,6 +429,13 @@ pub struct Stats {
     pub assoc_cash: Vec<i64>,
     /// Mean level of employed agents in their job's profession, in tenths.
     pub mean_level_tenths: u32,
+    /// Units of comfort goods bought since the world began.
+    pub comforts_total: u64,
+    /// People who moved to town for work (the town grew by them).
+    pub immigrants_total: u64,
+    /// Houses built by agents, finished or not.
+    pub houses_built_total: u64,
+    pub beds: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -453,6 +486,15 @@ pub struct World {
     pension_fund: i64,
     /// Treasury per association.
     assoc_cash: Vec<i64>,
+    /// Units of comfort goods bought since the world began.
+    comforts_total: u64,
+    /// People who moved to town for work, growing it.
+    immigrants: u64,
+    /// Days in a row businesses wanted workers and found none.
+    labour_short_days: u64,
+    /// Day each house is (or was) finished.
+    house_ready: Vec<u64>,
+    houses_built: u64,
     /// Current value of every rule, per association in rule order.
     rule_values: Vec<Vec<i64>>,
     /// Experience per agent and profession (the good a business makes),
@@ -549,6 +591,11 @@ impl World {
             arrivals: 0,
             pension_fund: 0,
             assoc_cash: vec![0; config.associations.len()],
+            comforts_total: 0,
+            immigrants: 0,
+            labour_short_days: 0,
+            house_ready: vec![0; config.houses.len()],
+            houses_built: 0,
             rule_values: (config.associations.iter())
                 .map(|a| vec![0; a.rules.len()])
                 .collect(),
@@ -783,7 +830,7 @@ impl World {
                 .collect(),
             homeless: self.home.iter().filter(|&&h| h == NO_HOME).count() as u32,
             commute_centi: self.commute_centi(),
-            firms: self.owns.iter().filter(|&&b| b != NO_EMPLOYER).count() as u32,
+            firms: self.owned_open_firms(),
             firms_founded_total: self.firms_founded,
             firms_closed_total: self.firms_closed,
             deaths_total: self.deaths,
@@ -815,10 +862,26 @@ impl World {
                     .collect();
                 (levels.iter().sum::<u64>() * 10 / levels.len().max(1) as u64) as u32
             },
-            money_owners: (0..self.config.agents as usize)
-                .filter(|&i| self.owns[i] != NO_EMPLOYER)
-                .map(|i| self.money[i])
+            comforts_total: self.comforts_total,
+            immigrants_total: self.immigrants,
+            houses_built_total: self.houses_built,
+            beds: (0..self.housing.len())
+                .filter(|&h| !self.housing.under_construction(h))
+                .map(|h| self.housing.config(h).beds)
                 .sum(),
+            money_owners: {
+                let e = &self.economy;
+                let mut owner = vec![false; self.money.len()];
+                for b in (0..e.len()).filter(|&b| e.is_open(b)) {
+                    if let Some(o) = e.owner(b) {
+                        owner[o as usize] = true;
+                    }
+                }
+                (0..self.money.len())
+                    .filter(|&i| owner[i])
+                    .map(|i| self.money[i])
+                    .sum()
+            },
         }
     }
 
@@ -886,6 +949,11 @@ impl World {
         self.life_course(at, log);
         self.collect_rent(at, log);
         self.housing.adjust_rents();
+        for h in 0..self.housing.len() {
+            if self.housing.under_construction(h) && self.day() >= self.house_ready[h as usize] {
+                self.housing.finish(h);
+            }
+        }
         self.choose_homes(at, log);
         if self.day().is_multiple_of(WEEK_DAYS) {
             self.associations_meet(at, log);
@@ -919,6 +987,8 @@ impl World {
         }
 
         self.found_firm(at, log);
+        self.expand_town(at, log);
+        self.build_house(at, log);
 
         // Core crews first, so every link of the chain can produce.
         for b in 0..self.economy.len() {
@@ -932,24 +1002,129 @@ impl World {
                 self.hire(agent, b, at, log);
             }
         }
-        // Then one hire per business per round, so no business takes everyone.
-        'rounds: loop {
+        let short_of_workers = !self.hire_rounds(at, log);
+        self.labour_short_days = if short_of_workers {
+            self.labour_short_days + 1
+        } else {
+            0
+        };
+        // Work nobody took for a week, a free bed and food to spare (it was
+        // not short lately and nobody is starving): newcomers arrive and
+        // are hired at once.
+        if let Some(g) = self.config.growth.clone() {
+            let fed = self.economy.shortage(self.config.food) < 50
+                && (0..self.config.agents).all(|a| self.hunger(a) < self.config.hunger_critical);
+            if self.labour_short_days >= WEEK_DAYS && fed {
+                let beds: u32 = (0..self.housing.len())
+                    .map(|h| self.housing.free_beds(h))
+                    .sum();
+                let room = g.max_agents.saturating_sub(self.config.agents).min(beds);
+                for _ in 0..g.arrivals_per_day.min(room) {
+                    self.arrive(at, log);
+                }
+                self.hire_rounds(at, log);
+            }
+        }
+        self.pay_dividends();
+    }
+
+    /// One hire per business per round, so no business takes everyone.
+    /// False if businesses still wanted people when the job seekers ran out.
+    fn hire_rounds(&mut self, at: Minute, log: &mut impl FnMut(LogEntry)) -> bool {
+        let hours = self.config.work_hours();
+        loop {
             let mut hired = false;
             for b in 0..self.economy.len() {
                 if !self.wants_to_hire(b, hours) {
                     continue;
                 }
                 let Some(agent) = self.hire_candidate(b) else {
-                    break 'rounds;
+                    return false;
                 };
                 self.hire(agent, b, at, log);
                 hired = true;
             }
             if !hired {
-                break;
+                return true;
             }
         }
-        self.pay_dividends();
+    }
+
+    /// A new person moves to town: a new agent ID at the end, of working
+    /// age, with no money and no home yet, waking up right away.
+    fn arrive(&mut self, at: Minute, log: &mut impl FnMut(LogEntry)) {
+        let agent = self.config.agents;
+        let i = agent as usize;
+        let now = self.now;
+        let seed = self.seed;
+        // Population by weight, traits in its ranges.
+        let pops = &self.config.populations;
+        let total: u64 = pops.iter().map(|p| p.weight as u64).sum::<u64>().max(1);
+        let mut pick = life::roll(seed, agent, 0, 5, 0, total - 1);
+        let mut pop = 0;
+        for (p, population) in pops.iter().enumerate() {
+            if pick < population.weight as u64 {
+                pop = p;
+                break;
+            }
+            pick -= population.weight as u64;
+        }
+        let k = self.config.traits.len();
+        for t in 0..k {
+            let (lo, hi) = pops
+                .get(pop)
+                .and_then(|p| p.traits.get(t))
+                .copied()
+                .unwrap_or((0, NEED_MAX));
+            self.traits
+                .push(life::roll(seed, agent, 0, 16 + t as u64, lo as u64, hi as u64) as u32);
+        }
+        self.population.push(pop as u32);
+        let (birth_day, lifespan) = match &self.config.life {
+            Some(l) => {
+                let y = DAYS_PER_YEAR;
+                let lo = l.education_end_age as u64 * y;
+                let age = life::roll(seed, agent, 0, 0, lo, (40 * y).max(lo));
+                (
+                    self.day() as i64 - age as i64,
+                    life::lifespan(l, seed, agent, 0, age),
+                )
+            }
+            None => (0, u64::MAX),
+        };
+        self.birth_day.push(birth_day);
+        self.lifespan.push(lifespan);
+        self.generation.push(0);
+        self.parent.push(NO_PARENT);
+        self.hunger.push(LazyNeed::new(0, now));
+        self.fatigue.push(LazyNeed::new(0, now));
+        self.money.push(0);
+        self.employer.push(NO_EMPLOYER);
+        self.home.push(NO_HOME);
+        let center = self.config.map.center();
+        self.pos.push(center);
+        self.action.push(Action {
+            started: now,
+            ends: now,
+            target: center,
+            ..Action::IDLE
+        });
+        self.event_no.push(0);
+        self.work_minutes.push(0);
+        self.work_at_day_start.push(0);
+        self.work_recent.push(0);
+        self.owns.push(NO_EMPLOYER);
+        let g = self.config.goods.len();
+        self.xp.extend(std::iter::repeat_n(0, g));
+        self.config.agents += 1;
+        self.immigrants += 1;
+        self.queue.push(now, Event::Wake { agent });
+        debug_assert_eq!(self.money.len(), i + 1);
+        log(LogEntry::Life {
+            at,
+            agent,
+            change: LifeChange::Arrived,
+        });
     }
 
     /// Every tenant pays a day's rent; who cannot is evicted.
@@ -1143,14 +1318,19 @@ impl World {
     /// up where nobody spends it, which would kill demand.
     fn pay_dividends(&mut self) {
         let hours = self.config.work_hours();
-        // Comfort spending comes first and joins the rent in the town's payout.
-        let target = self.safety_target();
-        let permille = self.config.behaviour.comfort_spend_permille;
+        // Without comfort goods, comfort spending goes to the town and joins
+        // the rent in its payout.
         let mut comfort = 0;
-        for m in &mut self.money {
-            let spend = (*m - target).max(0) * permille / 1000;
-            *m -= spend;
-            comfort += spend;
+        if self.config.comfort_goods.is_empty() {
+            let target = self.safety_target();
+            let permille = self.config.behaviour.comfort_spend_permille;
+            for m in &mut self.money {
+                let spend = (*m - target).max(0) * permille / 1000;
+                *m -= spend;
+                comfort += spend;
+            }
+        } else {
+            comfort = self.buy_comforts();
         }
         let needy: Vec<usize> = (0..self.config.agents)
             .filter(|&a| self.safety(a) > 0)
@@ -1166,6 +1346,8 @@ impl World {
             return;
         }
         let tax = (self.config.behaviour.founding.as_ref()).map_or(0, |f| f.profit_tax_percent);
+        // Everything for the town goes into one pot first.
+        let mut pot = comfort;
         for b in 0..self.economy.len() {
             let mut surplus = self.economy.take_surplus(b, hours);
             if let Some(owner) = self.economy.owner(b) {
@@ -1173,34 +1355,104 @@ impl World {
                 self.money[owner as usize] += dividend;
                 surplus -= dividend;
             }
-            let share = surplus / n;
-            recipients.iter().for_each(|&i| self.money[i] += share);
-            self.economy.add_cash(b, surplus - share * n);
+            pot += surplus;
         }
-        // Houses have no costs yet: all rent flows back the same way.
-        let mut rent = comfort;
+        // Town houses have no costs yet: their rent flows back the same
+        // way. Built houses pay their owner, after the profit tax.
         for h in 0..self.housing.len() {
-            rent += self.housing.take_cash(h);
+            let cash = self.housing.take_cash(h);
+            match self.housing.owner(h) {
+                Some(owner) => {
+                    let income = cash * (100 - tax) / 100;
+                    self.money[owner as usize] += income;
+                    pot += cash - income;
+                }
+                None => pot += cash,
+            }
         }
-        let share = rent / n;
+        // The town backs its own businesses: one below half its reserve
+        // is topped up to the full reserve, so a cash squeeze along the
+        // chain cannot stop all production.
+        for b in 0..self.economy.len() {
+            if !self.economy.is_open(b) || self.economy.owner(b).is_some() {
+                continue;
+            }
+            let reserve = self.economy.reserve(b, hours);
+            let cash = self.economy.cash(b);
+            if 2 * cash < reserve {
+                let top_up = (reserve - cash).min(pot);
+                self.economy.add_cash(b, top_up);
+                pot -= top_up;
+            }
+        }
+        // A day of meals first for whoever cannot buy one, poorest first
+        // (then lower ID); the rest in equal shares.
+        let floor = self.config.behaviour.meals_per_day
+            * self.with_tax(self.config.food, self.food_list_price());
+        let mut poor: Vec<usize> = recipients
+            .iter()
+            .copied()
+            .filter(|&i| self.money[i] < floor)
+            .collect();
+        poor.sort_by_key(|&i| (self.money[i], i));
+        // What the pot lacks for that is levied on savings above the safety
+        // reserve, in proportion to them (poor relief).
+        let lacking: i64 = poor.iter().map(|&i| floor - self.money[i]).sum::<i64>() - pot;
+        if lacking > 0 {
+            let target = self.safety_target();
+            let spare: Vec<i64> = self.money.iter().map(|&m| (m - target).max(0)).collect();
+            let total: i64 = spare.iter().sum();
+            if total > 0 {
+                let levy = lacking.min(total);
+                for (m, s) in self.money.iter_mut().zip(&spare) {
+                    let part = (*s as i128 * levy as i128 / total as i128) as i64;
+                    *m -= part;
+                    pot += part;
+                }
+            }
+        }
+        for i in poor {
+            let top_up = (floor - self.money[i]).min(pot);
+            self.money[i] += top_up;
+            pot -= top_up;
+        }
+        let share = pot / n;
         recipients.iter().for_each(|&i| self.money[i] += share);
+        // The remainder waits until tomorrow.
+        let rest = pot - share * n;
         if !self.housing.is_empty() {
-            // The remainder stays with the first house until tomorrow.
-            self.housing.add_cash(0, rent - share * n);
+            self.housing.add_cash(0, rest);
+        } else if !self.economy.is_empty() {
+            self.economy.add_cash(0, rest);
         }
     }
 
-    /// What founding a firm on the blueprint `t` looks like today: lowest
+    /// What founding a firm on blueprint `k` looks like today: lowest
     /// price and unit cost among the open producers, shortage, their count
-    /// and days since the newest of them opened.
-    fn market_vars(&self, t: BusinessId) -> [i64; 5] {
+    /// and days since the newest of them opened. Without producers: the
+    /// blueprint's price and its cost at today's input prices.
+    fn market_vars(&self, k: usize) -> [i64; 5] {
         let e = &self.economy;
-        let good = e.config(t).output;
+        let bp = self.config.blueprint(k);
+        let good = bp.output;
         let producers: Vec<BusinessId> = e.producers(good).collect();
         let lowest = |f: &dyn Fn(BusinessId) -> i64| producers.iter().map(|&b| f(b)).min();
+        let estimate = || {
+            // An input nobody makes yet costs its own blueprint's price.
+            let input = bp.input.map_or(0, |i| {
+                let price = e.producers(i.good).map(|b| e.price(b)).min();
+                let fallback = (self.config.blueprints().into_iter())
+                    .map(|k| self.config.blueprint(k))
+                    .find(|b| b.output == i.good)
+                    .map_or(0, |b| b.start_price);
+                price.unwrap_or(fallback) * i.amount as i64
+            });
+            let rate = bp.output_milli_per_worker_hour.max(1) as i64;
+            input + (bp.start_wage.max(0) * 1000 + rate - 1) / rate
+        };
         [
-            lowest(&|b| e.price(b)).unwrap_or(e.config(t).start_price),
-            lowest(&|b| e.unit_cost(b)).unwrap_or(0),
+            lowest(&|b| e.price(b)).unwrap_or(bp.start_price),
+            lowest(&|b| e.unit_cost(b)).unwrap_or_else(estimate),
             e.shortage(good) as i64,
             producers.len() as i64,
             producers
@@ -1211,36 +1463,26 @@ impl World {
         ]
     }
 
-    /// Blueprints for founded firms: the first business of the world file
-    /// making each good.
-    fn blueprints(&self) -> Vec<BusinessId> {
-        let b = &self.config.businesses;
-        (0..b.len())
-            .filter(|&i| b[..i].iter().all(|o| o.output != b[i].output))
-            .map(|i| i as BusinessId)
-            .collect()
-    }
-
     /// The best founding of the day, if any is allowed: (agent, blueprint).
     /// Ties go to the lower agent ID, then the lower blueprint.
-    pub fn founding_choice(&self) -> Option<(u32, BusinessId, i64)> {
+    pub fn founding_choice(&self) -> Option<(u32, usize, i64)> {
         let rule = self.config.behaviour.founding.as_ref()?;
-        let open = self.owns.iter().filter(|&&b| b != NO_EMPLOYER).count() as u32;
+        let open = self.owned_open_firms();
         if open >= rule.max_firms {
             return None;
         }
-        let kinds: Vec<(BusinessId, [i64; 5])> = (self.blueprints().into_iter())
+        let kinds: Vec<(usize, [i64; 5])> = (self.config.blueprints().into_iter())
             .map(|t| (t, self.market_vars(t)))
             .collect();
-        let mut best: Option<(u32, BusinessId, i64)> = None;
+        let mut best: Option<(u32, usize, i64)> = None;
         for agent in 0..self.config.agents {
-            if self.owns[agent as usize] != NO_EMPLOYER || self.stage(agent) != Stage::Working {
+            if self.stage(agent) != Stage::Working {
                 continue;
             }
             let mut v = self.vars(agent, self.now);
             for &(t, m) in &kinds {
                 v[var::MARKET_PRICE..=var::MARKET_NEWEST_DAYS].copy_from_slice(&m);
-                let fee = self.founding_fee(self.economy.config(t).output);
+                let fee = self.founding_fee(self.config.blueprint(t).output);
                 v[var::MARKET_FEE] = fee;
                 if v[var::MONEY] < rule.capital + fee
                     || rule.when.as_ref().is_some_and(|f| f.eval(&v) <= 0)
@@ -1275,13 +1517,19 @@ impl World {
             .as_ref()
             .map_or(0, |f| f.capital);
         let [price, ..] = self.market_vars(t);
-        let blueprint = &self.config.businesses[t as usize];
+        let blueprint = self.config.blueprint(t);
+        // A town business of the same kind sets the going wage.
+        let wage = if t < self.config.businesses.len() && self.economy.is_open(t as BusinessId) {
+            self.economy.wage(t as BusinessId)
+        } else {
+            blueprint.start_wage
+        };
         let config = BusinessConfig {
             name: format!("{} (a{agent})", blueprint.name),
             pos,
             start_cash: capital,
             start_price: price,
-            start_wage: self.economy.wage(t),
+            start_wage: wage,
             start_stock: 0,
             ..blueprint.clone()
         };
@@ -1296,7 +1544,6 @@ impl World {
             .economy
             .open_business(config, agent, at / MINUTES_PER_DAY);
         self.map.build(pos, Building::Business(b));
-        self.owns[i] = b;
         self.firms_founded += 1;
         log(LogEntry::Firm {
             at,
@@ -1304,10 +1551,168 @@ impl World {
             business: b,
             change: FirmChange::Founded { at_pos: pos },
         });
-        if self.employer[i] != NO_EMPLOYER {
-            self.leave_job(agent, self.employer[i], JobChange::Left, at, log);
+        // A founder who runs no firm yet runs this one as CEO; otherwise it
+        // hires its core crew like a town business.
+        if self.owns[i] == NO_EMPLOYER {
+            self.owns[i] = b;
+            if self.employer[i] != NO_EMPLOYER {
+                self.leave_job(agent, self.employer[i], JobChange::Left, at, log);
+            }
+            self.hire(agent, b, at, log);
         }
-        self.hire(agent, b, at, log);
+    }
+
+    /// A town business that is fully staffed while its good keeps running
+    /// short opens a branch from its own cash (founding capital plus its
+    /// reserve), at most one a day and none while a maker of the good
+    /// opened in the last half year. People who cannot save enough to found
+    /// a firm still get the work and the goods.
+    fn expand_town(&mut self, at: Minute, log: &mut impl FnMut(LogEntry)) {
+        let Some(capital) = (self.config.behaviour.founding.as_ref()).map(|f| f.capital) else {
+            return;
+        };
+        let hours = self.config.work_hours();
+        let e = &self.economy;
+        let Some(t) = (0..self.config.businesses.len()).find(|&t| {
+            let b = t as BusinessId;
+            let c = e.config(b);
+            let [.., newest] = self.market_vars(t);
+            // Every town business making the good is fully staffed.
+            let full = e
+                .producers(c.output)
+                .filter(|&p| e.owner(p).is_none())
+                .all(|p| e.workers(p) >= e.config(p).slots);
+            e.is_open(b)
+                && e.owner(b).is_none()
+                && full
+                && e.shortage(c.output) >= 500
+                && newest >= 180
+                && e.cash(b) >= capital + e.reserve(b, hours)
+        }) else {
+            return;
+        };
+        let home = t as BusinessId;
+        let Some(pos) = self.map.free_parcel_near(self.economy.config(home).pos) else {
+            return;
+        };
+        let blueprint = self.config.blueprint(t);
+        let config = BusinessConfig {
+            name: format!("{} (town)", blueprint.name),
+            pos,
+            start_cash: 0,
+            start_price: self.economy.price(home),
+            start_wage: self.economy.wage(home),
+            start_stock: 0,
+            ..blueprint.clone()
+        };
+        let paid = self.economy.pay(home, capital);
+        let b = self
+            .economy
+            .open_business(config, NO_OWNER, at / MINUTES_PER_DAY);
+        self.economy.add_cash(b, paid);
+        self.map.build(pos, Building::Business(b));
+        self.firms_founded += 1;
+        log(LogEntry::Firm {
+            at,
+            agent: NO_OWNER,
+            business: b,
+            change: FirmChange::Founded { at_pos: pos },
+        });
+    }
+
+    /// At most one house a day: the best-scoring agent the building rule
+    /// allows pays the cost to the town and builds near where people work.
+    fn build_house(&mut self, at: Minute, log: &mut impl FnMut(LogEntry)) {
+        let Some(rule) = self.config.behaviour.building.clone() else {
+            return;
+        };
+        let built = (0..self.housing.len())
+            .filter(|&h| self.housing.owner(h).is_some())
+            .count();
+        if built as u32 >= rule.max_houses {
+            return;
+        }
+        let hs = &self.housing;
+        // Beds under construction count as free: they are coming.
+        let town = [
+            (0..hs.len())
+                .map(|h| match hs.under_construction(h) {
+                    true => hs.config(h).beds as i64,
+                    false => hs.free_beds(h) as i64,
+                })
+                .sum(),
+            self.home.iter().filter(|&&h| h == NO_HOME).count() as i64,
+            hs.wanted() as i64,
+            (0..hs.len()).map(|h| hs.rent(h)).sum::<i64>() / hs.len().max(1) as i64,
+        ];
+        let mut best: Option<(i64, u32)> = None;
+        for agent in 0..self.config.agents {
+            if self.money[agent as usize] < rule.cost || self.stage(agent) == Stage::Education {
+                continue;
+            }
+            let mut v = self.vars(agent, self.now);
+            v[var::HOUSING_FREE_BEDS..=var::HOUSING_RENT].copy_from_slice(&town);
+            if rule.when.as_ref().is_some_and(|f| f.eval(&v) <= 0) {
+                continue;
+            }
+            let score = rule.score.eval(&v);
+            if best.is_none_or(|(s, _)| score > s) {
+                best = Some((score, agent));
+            }
+        }
+        let Some((_, agent)) = best else {
+            return;
+        };
+        let Some(pos) = self.map.free_parcel_near(self.jobs_center()) else {
+            return;
+        };
+        let hs = &self.housing;
+        let mean_rent = (0..hs.len()).map(|h| hs.rent(h)).sum::<i64>() / hs.len().max(1) as i64;
+        let config = HouseConfig {
+            name: format!("house (a{agent})"),
+            pos,
+            beds: rule.beds,
+            start_rent: rule.start_rent.max(mean_rent),
+        };
+        self.money[agent as usize] -= rule.cost;
+        // Land and permit: the cost joins the welfare with today's rent.
+        self.housing.add_cash(0, rule.cost);
+        let h = self.housing.start_building(config, agent);
+        self.house_ready.push(self.day() + rule.construction_days);
+        self.map.build(pos, Building::House(h));
+        self.houses_built += 1;
+        log(LogEntry::Home {
+            at,
+            agent,
+            house: h,
+            change: HomeChange::Built,
+        });
+    }
+
+    /// Open businesses owned by agents.
+    fn owned_open_firms(&self) -> u32 {
+        let e = &self.economy;
+        (0..e.len())
+            .filter(|&b| e.is_open(b) && e.owner(b).is_some())
+            .count() as u32
+    }
+
+    /// Mean workplace of everyone employed; the map centre if nobody is.
+    fn jobs_center(&self) -> Pos {
+        let (mut x, mut y, mut n) = (0u64, 0u64, 0u64);
+        for a in 0..self.config.agents {
+            if self.employer[a as usize] != NO_EMPLOYER {
+                let p = self.work_pos(a);
+                x += p.x as u64;
+                y += p.y as u64;
+                n += 1;
+            }
+        }
+        if n == 0 {
+            self.config.map.center()
+        } else {
+            Pos::new((x / n) as u16, (y / n) as u16)
+        }
     }
 
     /// Every open business reads the close rule (a firm through its CEO);
@@ -1322,14 +1727,15 @@ impl World {
                 if !self.economy.is_open(b) {
                     return false;
                 }
-                let v = match self.economy.owner(b) {
+                let mut v = match self.economy.owner(b) {
                     Some(owner) => self.vars(owner, self.now),
-                    None => {
-                        let mut v = [0; MAX_VARS];
-                        self.firm_vars(b, self.now, &mut v);
-                        v
-                    }
+                    // The town backs its own businesses and never closes
+                    // them, so no link of the chain can vanish for good;
+                    // branches it opened later close like firms.
+                    None if (b as usize) < self.config.businesses.len() => return false,
+                    None => [0; MAX_VARS],
                 };
+                self.firm_vars(b, self.now, &mut v);
                 rule.close_when.eval(&v) > 0
             })
             .collect();
@@ -1354,7 +1760,7 @@ impl World {
         let owner = self.economy.owner(b);
         let cash = self.economy.close(b);
         self.map.clear(self.economy.config(b).pos);
-        if let Some(o) = owner {
+        if let Some(o) = owner.filter(|&o| self.owns[o as usize] == b) {
             self.owns[o as usize] = NO_EMPLOYER;
         }
         self.firms_closed += 1;
@@ -1426,17 +1832,26 @@ impl World {
             }
             self.money[heirs[0] as usize] += money - share * heirs.len() as i64;
         }
-        let b = std::mem::replace(&mut self.owns[i], NO_EMPLOYER);
-        if b != NO_EMPLOYER {
-            match heirs
-                .iter()
-                .copied()
-                .find(|&h| self.owns[h as usize] == NO_EMPLOYER)
-            {
+        // Houses go to the first child, or back to the town.
+        for h in 0..self.housing.len() {
+            if self.housing.owner(h) == Some(agent) {
+                self.housing
+                    .set_owner(h, heirs.first().copied().unwrap_or(crate::housing::TOWN));
+            }
+        }
+        // Every firm goes to the first child; one without a firm of their
+        // own to run and of working age takes over as CEO. Without children
+        // the firms close.
+        self.owns[i] = NO_EMPLOYER;
+        let firms: Vec<BusinessId> = (0..self.economy.len())
+            .filter(|&b| self.economy.is_open(b) && self.economy.owner(b) == Some(agent))
+            .collect();
+        for b in firms {
+            match heirs.first().copied() {
                 Some(h) => {
                     self.economy.set_owner(b, h);
-                    self.owns[h as usize] = b;
-                    if self.stage(h) == Stage::Working {
+                    if self.owns[h as usize] == NO_EMPLOYER && self.stage(h) == Stage::Working {
+                        self.owns[h as usize] = b;
                         let job = self.employer[h as usize];
                         if job != NO_EMPLOYER {
                             self.leave_job(h, job, JobChange::Left, at, log);
@@ -1535,6 +1950,75 @@ impl World {
                 None => LifeChange::Arrived,
             },
         });
+    }
+
+    /// Everyone spends their comfort budget (a share of savings above the
+    /// safety reserve) on comfort goods, a unit at a time from the cheapest
+    /// seller, going round the goods. What finds nothing to buy goes to the
+    /// town's services instead (returned: it joins the welfare). Who buys
+    /// first rotates daily, as does the good they start with.
+    fn buy_comforts(&mut self) -> i64 {
+        let n = self.config.agents;
+        let goods = self.config.comfort_goods.clone();
+        let mut to_town = 0;
+        if n == 0 || goods.is_empty() {
+            return 0;
+        }
+        let target = self.safety_target();
+        let permille = self.config.behaviour.comfort_spend_permille;
+        let day = self.day();
+        for k in 0..n {
+            let agent = ((day + k as u64) % n as u64) as usize;
+            let spare = (self.money[agent] - target).max(0);
+            let mut budget = spare * permille / 1000;
+            // A small share of modest savings would never buy anything: with
+            // five units' worth spare, one unit is affordable.
+            let cheapest = (goods.iter())
+                .filter_map(|&g| {
+                    self.economy
+                        .cheapest_seller(g)
+                        .map(|b| self.with_tax(g, self.economy.price(b)))
+                })
+                .min();
+            if let Some(c) = cheapest {
+                if spare >= 5 * c {
+                    budget = budget.max(c);
+                }
+            }
+            let mut g = (day as usize + agent) % goods.len();
+            let mut misses = 0;
+            while misses < goods.len() {
+                let good = goods[g];
+                g = (g + 1) % goods.len();
+                let Some(seller) = self.economy.cheapest_seller(good) else {
+                    if budget > 0 {
+                        self.economy.note_unmet(good, 1);
+                    }
+                    misses += 1;
+                    continue;
+                };
+                let cost = self.with_tax(good, self.economy.price(seller));
+                if cost > budget || cost <= 0 {
+                    misses += 1;
+                    continue;
+                }
+                misses = 0;
+                let price = self.economy.sell_one(seller);
+                self.money[agent] -= price;
+                budget -= price;
+                for a in 0..self.assoc_cash.len() {
+                    let tax = price * self.rule(a, RuleKind::SalesTaxPercent, good) / 100;
+                    self.money[agent] -= tax;
+                    budget -= tax;
+                    self.assoc_cash[a] += tax;
+                }
+                self.comforts_total += 1;
+            }
+            let rest = budget.clamp(0, self.money[agent].max(0));
+            self.money[agent] -= rest;
+            to_town += rest;
+        }
+        to_town
     }
 
     fn leave_job(
@@ -1805,10 +2289,8 @@ impl World {
         }
     }
 
-    fn blueprint_of(&self, good: GoodId) -> Option<BusinessId> {
-        (self.config.businesses.iter())
-            .position(|b| b.output == good)
-            .map(|b| b as BusinessId)
+    fn blueprint_of(&self, good: GoodId) -> Option<usize> {
+        (self.config.blueprints().into_iter()).find(|&k| self.config.blueprint(k).output == good)
     }
 
     fn can_buy_food(&self, i: usize) -> bool {
@@ -1863,9 +2345,16 @@ impl World {
         if let Some(f) = &c.behaviour.founding {
             v[var::FIRM_CAPITAL] = f.capital;
         }
+        if let Some(b) = &c.behaviour.building {
+            v[var::BUILDING_COST] = b.cost;
+        }
         if self.owns[i] != NO_EMPLOYER {
             self.firm_vars(self.owns[i], now, &mut v);
         }
+        let e = &self.economy;
+        v[var::OWNS_FIRM] = (0..e.len())
+            .filter(|&b| e.is_open(b) && e.owner(b) == Some(agent))
+            .count() as i64;
         if self.config.life.is_some() {
             v[var::AGE] = (self.age_days(agent) / DAYS_PER_YEAR) as i64;
             let stage = self.stage(agent);
@@ -1880,7 +2369,6 @@ impl World {
 
     fn firm_vars(&self, b: BusinessId, now: Minute, v: &mut [i64; MAX_VARS]) {
         let e = &self.economy;
-        v[var::OWNS_FIRM] = 1;
         v[var::FIRM_CASH] = e.cash(b);
         v[var::FIRM_BROKE_DAYS] = e.broke_days(b) as i64;
         v[var::FIRM_AGE_DAYS] = (now / MINUTES_PER_DAY).saturating_sub(e.opened_day(b)) as i64;
@@ -2077,6 +2565,11 @@ impl StateHash for World {
         h.write_u64(self.arrivals);
         h.write_i64(self.pension_fund);
         h.write_i64_slice(&self.assoc_cash);
+        h.write_u64(self.comforts_total);
+        h.write_u64(self.immigrants);
+        h.write_u64(self.labour_short_days);
+        self.house_ready.iter().for_each(|&d| h.write_u64(d));
+        h.write_u64(self.houses_built);
         self.rule_values.iter().for_each(|v| h.write_i64_slice(v));
         self.xp.iter().for_each(|&x| h.write_u64(x));
     }
@@ -2161,6 +2654,8 @@ pub(crate) mod tests {
             start_money: 200,
             goods: vec!["grain".into(), "flour".into(), "bread".into()],
             food: BREAD,
+            recipes: Vec::new(),
+            comfort_goods: Vec::new(),
             businesses: vec![
                 business("field", GRAIN, None, 750, 22, 15, 200, 3, 3),
                 business("mill", FLOUR, Some(GRAIN), 1500, 12, 25, 200, 12, 4),
@@ -2204,6 +2699,7 @@ pub(crate) mod tests {
             life: None,
             associations: Vec::new(),
             career: None,
+            growth: None,
             hunger_per_hour: 40,
             hunger_critical: 800,
             fatigue_per_hour: 40,
@@ -2274,6 +2770,7 @@ pub(crate) mod tests {
                 homeless_score: compile(HOUSING.2),
             },
             founding: None,
+            building: None,
         }
     }
 
@@ -2767,10 +3264,11 @@ mod firm_tests {
                 _ => None,
             })
             .collect();
-        // Town businesses are always older than three days too.
+        assert!(!closed.is_empty());
+        // The town backs its own businesses: they never close.
         assert!(
-            closed.iter().any(|&(_, b)| b < 3),
-            "town businesses follow the rule"
+            closed.iter().all(|&(_, b)| b >= 3),
+            "town businesses stay open"
         );
         for &(agent, b) in &closed {
             let e = w.economy();

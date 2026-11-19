@@ -25,7 +25,8 @@ staff, stock, employment, hunger, meals, work hours, money Gini, share of
 time spent starving, rent and tenants per house, homeless, mean commute,
 founded firms open / founded / closed, money held by firm owners, deaths,
 births, newcomers, mean age, people in education and retired, price index,
-treasury per association, mean level of workers):
+treasury per association, mean level of workers, people, newcomers who
+moved in for work, beds, houses built, comfort goods bought):
 
 ```bash
 cargo run --release -p timeloop-sim -- --days 3650 --stats stats.csv --quiet
@@ -91,14 +92,30 @@ decides its rules anew from formulas. Rules change what actions cost or
 allow: `min_price` / `max_price` for sellers, `founding_fee` for founders
 (`market.fee` in the founding formulas), `dues_percent` on members' sales,
 `sales_tax_percent` on every meal (included in `food_price`). The bundled
-bakers' guild sets bread's minimum price to cost plus half, takes 5% dues and
+bakers' guild sets bread's minimum price to cost plus three quarters, takes 5% dues and
 200 per new bakery; the council taxes meals by 5%. The price index is what
 the cheapest meal costs, tax included, in percent of bread's starting price.
+
+New goods and building (iteration 5c): recipes (`[[recipe]]`: brewery, woodcutter,
+carpenter) are kinds of business nobody runs at the start; founders open
+them like any other once their good is short and sells well. Beer and
+furniture are comfort goods (`goods.comfort`): people spend their comfort
+budget on them, and what finds nothing to buy goes to the town. Someone
+with enough cash builds a house (`[building]`) when full houses turn people
+away; it takes 30 days, its rent goes to the builder after the profit tax.
+Work nobody takes for a week draws newcomers (`[growth]`), but only while
+there is a free bed and food to spare. The town stands behind its own
+businesses: they never close, one below half its reserve is topped up from
+the town's income, and a fully staffed one whose good keeps running short
+opens a branch from its own cash. Welfare first tops everyone up to a day of
+meals; what the town's income lacks for that is levied on savings above the
+safety reserve (poor relief).
 
 To watch and steer the town live, start the engine as a local server and
 open the page it prints. The engine runs natively in its own thread for up to
 80 years (`--years N` to change); the page shows the map as it is right now,
-including founded firms (white corner, labelled with the owner), with play/pause, a speed control from 1 game minute per second up to as fast
+including founded firms (white corner, labelled with the owner) and houses
+agents built (corner; dashed while under construction); labels never overlap; with play/pause, a speed control from 1 game minute per second up to as fast
 as possible (Space, arrow keys), a history chart to jump to any point (back
 via a checkpoint per year), restart with another seed, and for a clicked agent
 how it scores every action. Speed never changes the outcome: the state hash
@@ -135,7 +152,9 @@ and survive, the town stays fed and owners hold less than half the money;
 the age structure; `sim/tests/careers.rs` checks that workers level up, the
 experienced save more, prices change by under 5% a day and hunger stays
 below iteration 5; `sim/tests/guilds.rs` checks that the guild's minimum
-price visibly raises the price index.
+price visibly raises the price index; `sim/tests/building.rs` checks over
+six seeds of 30 years that new kinds of business open, comfort goods sell,
+houses get built and the town grows while it stays fed.
 
 `content/data/world.toml` points at its schema, so editors with TOML schema
 support (Taplo / Even Better TOML) autocomplete and validate it. After changing

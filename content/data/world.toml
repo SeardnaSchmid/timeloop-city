@@ -6,8 +6,10 @@ agents = 50
 start_money = 200
 
 [goods]
-names = ["grain", "flour", "bread"]
+names = ["grain", "flour", "bread", "beer", "wood", "furniture"]
 food = "bread"
+# Bought with the comfort budget; nobody makes them at the start.
+comfort = ["beer", "furniture"]
 
 [[business]]
 name = "field"
@@ -51,6 +53,39 @@ wage = 10
 stock = 150
 output_target = 100
 input_target = 200
+
+# Kinds of business nobody runs at the start. Founders open them once their
+# good is short (people wanted it and found none) and sells well.
+[[recipe]]
+name = "brewery"
+output = "beer"
+input = { good = "grain", amount = 1 }
+output_milli_per_worker_hour = 2000
+slots = 6
+price = 20
+wage = 10
+output_target = 50
+input_target = 100
+
+[[recipe]]
+name = "woodcutter"
+output = "wood"
+output_milli_per_worker_hour = 1500
+slots = 6
+price = 15
+wage = 10
+output_target = 50
+
+[[recipe]]
+name = "carpenter"
+output = "furniture"
+input = { good = "wood", amount = 2 }
+output_milli_per_worker_hour = 500
+slots = 4
+price = 100
+wage = 10
+output_target = 20
+input_target = 40
 
 [market]
 price_change_percent = 5
@@ -115,13 +150,13 @@ homeless_score = "0"
 # Associations meet weekly: collect dues, pay out their treasury, decide
 # their rules (formulas over market.price, market.cost, market.shortage,
 # market.firms, assoc.cash, assoc.members, day).
-# The bakers' guild keeps bread from being sold below cost plus half,
+# The bakers' guild keeps bread from being sold below cost plus three quarters,
 # takes 5% of its members' sales and charges for opening a new bakery; its
 # treasury goes back to the bakeries.
 [[association]]
 name = "bakers guild"
 goods = ["bread"]
-rules = { min_price = "market.cost * 150 / 100", dues_percent = "5", founding_fee = "200" }
+rules = { min_price = "market.cost * 175 / 100", dues_percent = "5", founding_fee = "200" }
 
 # The town council: 5% on every meal, paid out as welfare.
 [[association]]
@@ -164,6 +199,22 @@ level_xp_growth_percent = 6
 output_per_level_permille = 20
 wage_per_level_permille = 20
 max_level = 100
+
+# Houses. Someone with the cost in cash builds when full houses turn people away
+# and few beds are free; rent goes to the builder (after the profit tax).
+[building]
+cost = 800
+beds = 8
+rent = 5
+construction_days = 30
+max_houses = 20
+when = "money >= building.cost + 200 && housing.wanted > 0 && housing.free_beds < 4"
+score = "money + housing.rent * 50"
+
+# Work nobody takes draws newcomers (working age, no money), up to 150 people.
+[growth]
+max_agents = 150
+arrivals_per_day = 1
 
 [needs.hunger]
 per_hour = 40
@@ -225,8 +276,8 @@ score = "300 + trait.work_life / 4"
 [founding]
 capital = 300
 profit_tax_percent = 75
-max_firms = 8
-when = "money >= firm.capital + 100 && market.newest_days >= 365 && market.price * 100 >= market.cost * 150"
+max_firms = 16
+when = "owns_firm < 3 && money >= firm.capital + 100 && market.newest_days >= 365 && market.price * 100 >= market.cost * 150 && (market.firms > 0 || market.shortage > 0)"
 score = "(market.price - market.cost) * 1000 / max(market.cost, 1) + market.shortage + trait.greed / 2"
 # Broke for a month: give up. Town businesses follow the same rule.
 close = "firm.broke_days >= 30"
