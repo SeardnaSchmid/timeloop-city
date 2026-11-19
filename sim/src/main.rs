@@ -8,6 +8,8 @@ use std::io::{self, BufWriter, Write};
 use std::time::SystemTime;
 use std::{path::PathBuf, process::ExitCode};
 
+mod viewer;
+
 use timeloop_core::{
     Allowed, Explanation, Minute, StateHash, Stats, World, WorldConfig, MINUTES_PER_DAY,
 };
@@ -22,6 +24,11 @@ Usage: sim [OPTIONS]
   --world FILE   custom world.toml instead of the bundled one
   --watch        reload the decision rules from --world when the file changes
   --stats FILE   write one CSV row of economy statistics per day
+  --years N      number of game years of 365 days (instead of --days)
+  --html FILE    write a map viewer (open it in a browser) of the whole run
+  --html-days N  let the viewer cover only the last N days
+  --html-step M  minutes between viewer frames (default: about 4000 frames,
+                 at least 10 minutes; daily or longer steps show noon)
   --log          print every event before each day's hash
   --quiet        print only the final hash
 
@@ -35,6 +42,9 @@ struct Args {
     world: Option<PathBuf>,
     watch: bool,
     stats: Option<PathBuf>,
+    html: Option<PathBuf>,
+    html_days: Option<u64>,
+    html_step: Option<Minute>,
     log: bool,
     quiet: bool,
     explain: Option<(u32, Minute)>,
@@ -59,6 +69,9 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
         world: None,
         watch: false,
         stats: None,
+        html: None,
+        html_days: None,
+        html_step: None,
         log: false,
         quiet: false,
         explain: None,
@@ -79,6 +92,10 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
             "--world" => a.world = Some(value("--world")?.into()),
             "--watch" => a.watch = true,
             "--stats" => a.stats = Some(value("--stats")?.into()),
+            "--html" => a.html = Some(value("--html")?.into()),
+            "--html-days" => a.html_days = Some(parse(&value("--html-days")?, "--html-days")?),
+            "--html-step" => a.html_step = Some(parse(&value("--html-step")?, "--html-step")?),
+            "--years" => a.days = 365 * parse::<u64>(&value("--years")?, "--years")?,
             "--log" => a.log = true,
             "--quiet" => a.quiet = true,
             "-h" | "--help" => return Err(String::new()),
@@ -159,6 +176,11 @@ fn run(args: &Args, mut world: World) -> io::Result<()> {
         }
         None => None,
     };
+    let mut recorder = args.html.as_ref().map(|_| {
+        let days = args.html_days.unwrap_or(args.days).min(args.days);
+        let start = (args.days - days) * MINUTES_PER_DAY;
+        viewer::Recorder::new(start, days * MINUTES_PER_DAY, args.html_step)
+    });
     let mut meals_before = 0;
     let mut work_before = 0;
     let mut starving_before = 0;
@@ -181,13 +203,26 @@ fn run(args: &Args, mut world: World) -> io::Result<()> {
                 }
             }
         }
-        let mut result = Ok(());
-        world.run_until(day * MINUTES_PER_DAY, &mut |entry| {
-            if args.log && result.is_ok() {
-                result = writeln!(out, "{entry}");
+        // Stop at every viewer frame due today, then at the end of the day.
+        let end = day * MINUTES_PER_DAY;
+        loop {
+            let frame = recorder
+                .as_ref()
+                .and_then(|r| r.next_frame())
+                .filter(|&t| t <= end);
+            let until = frame.unwrap_or(end);
+            let mut result = Ok(());
+            world.run_until(until, &mut |entry| {
+                if args.log && result.is_ok() {
+                    result = writeln!(out, "{entry}");
+                }
+            });
+            result?;
+            match (frame, &mut recorder) {
+                (Some(_), Some(r)) => r.record(&world),
+                _ => break,
             }
-        });
-        result?;
+        }
         if let Some(f) = &mut stats {
             let s = world.stats();
             let work_hours = (s.work_minutes_total - work_before) / 60;
@@ -208,6 +243,10 @@ fn run(args: &Args, mut world: World) -> io::Result<()> {
     }
     if let Some(f) = &mut stats {
         f.flush()?;
+    }
+    if let (Some(r), Some(path)) = (&recorder, &args.html) {
+        r.write(&world, path)?;
+        eprintln!("map viewer written to {}", path.display());
     }
     out.flush()
 }

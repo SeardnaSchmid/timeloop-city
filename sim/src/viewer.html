@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timeloop City Map</title>
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #ffffff; --ink: #1f2328; --muted: #6b6f76; --line: #e3e1da;
+  --grid: #ebe9e2; --land: 120, 110, 80;
+  --eat: #d9822b; --sleep: #6c63c9; --work: #2b8a5e; --overtime: #0f5c3d;
+  --wander: #9aa0a6; --travel: #2f7fd1; --idle: #c9ccd1;
+  --field: #8fb339; --mill: #c9a227; --bakery: #b5652d; --house: #4a78b5; --other: #7a7f87;
+  --sel: #e0245e;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171a; --panel: #1d2024; --ink: #e8e6e1; --muted: #9a9ea5; --line: #2c3035;
+    --grid: #24282d; --land: 230, 210, 150;
+    --wander: #737a82; --idle: #4a4f56; --house: #6f9bd8; --sel: #ff5c8a;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171a; --panel: #1d2024; --ink: #e8e6e1; --muted: #9a9ea5; --line: #2c3035;
+  --grid: #24282d; --land: 230, 210, 150;
+  --wander: #737a82; --idle: #4a4f56; --house: #6f9bd8; --sel: #ff5c8a;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1280px; margin: 0 auto; padding: 16px; display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; }
+@media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+header { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+h1 { font-size: 18px; margin: 0 12px 0 0; }
+.clock { font-variant-numeric: tabular-nums; font-size: 18px; min-width: 120px; }
+button, select { font: inherit; color: var(--ink); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+input[type=range] { flex: 1 1 200px; min-width: 120px; }
+label { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.map { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+canvas { display: block; width: 100%; height: auto; cursor: crosshair; }
+aside { display: flex; flex-direction: column; gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
+.legend { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.sq { border-radius: 2px; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+td { padding: 2px 0; } td:last-child { text-align: right; }
+.muted { color: var(--muted); }
+#hist { cursor: pointer; margin-bottom: 6px; }
+.span { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Timeloop City</h1>
+    <span class="clock" id="clock"></span>
+    <span class="span" id="span"></span>
+    <button id="play">Play</button>
+    <select id="speed" aria-label="Speed">
+      <option value="30">30 min/s</option>
+      <option value="60">1 h/s</option>
+      <option value="240">4 h/s</option>
+      <option value="1440">1 day/s</option>
+      <option value="10080">1 week/s</option>
+      <option value="43800">1 month/s</option>
+      <option value="131400">3 months/s</option>
+      <option value="525600">1 year/s</option>
+    </select>
+    <input id="seek" type="range" min="0" value="0" step="any" aria-label="Time">
+    <label><input id="landToggle" type="checkbox"> land price</label>
+  </header>
+  <div class="map"><canvas id="map"></canvas></div>
+  <aside>
+    <div class="card" id="info"><h2>Selection</h2><div class="muted">Click an agent or a building.</div></div>
+    <div class="card"><h2>Town</h2><table id="town"></table></div>
+    <div class="card"><h2>History</h2>
+      <canvas id="hist" height="130" aria-label="History chart; click to jump"></canvas>
+      <div class="legend" id="histLegend"></div>
+    </div>
+    <div class="card"><h2>Agents</h2><div class="legend" id="legend"></div></div>
+  </aside>
+</main>
+<script>
+const D = /*DATA*/null;
+const $ = id => document.getElementById(id);
+const canvas = $('map'), ctx = canvas.getContext('2d');
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const F = D.frames, N = D.agentTraits.length, A = 7; // ints per agent per frame
+const t0 = F[0].t, tEnd = F[F.length - 1].t;
+let playhead = 0, playing = false, last = 0, selected = null;
+
+const goodColor = g => ({ grain: '--field', flour: '--mill', bread: '--bakery' }[g] || '--other');
+const fmtTime = t => { const d = Math.floor(t / 1440), m = t % 1440;
+  const hm = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(Math.floor(m % 60)).padStart(2, '0')}`;
+  return `year ${Math.floor(d / 365)} · day ${d % 365} · ${hm}`; };
+const fmtSpan = m => m < 60 ? `${m} min` : m < 1440 ? `${m / 60} h` : `${Math.round(m / 1440)} days`;
+const daily = D.step >= 1440; // frames days apart: no in-between motion
+
+$('seek').max = F.length - 1;
+$('span').textContent = `${fmtTime(t0).replace(/ · \d\d:\d\d$/, '')} → ${fmtTime(tEnd).replace(/ · \d\d:\d\d$/, '')} · one frame every ${fmtSpan(D.step)}`;
+// Default speed: the whole recording in about a minute.
+{ const want = (tEnd - t0) / 60, opts = [...$('speed').options];
+  (opts.find(o => Number(o.value) >= want) || opts[opts.length - 1]).selected = true; }
+$('legend').innerHTML = D.actions.filter(a => a !== 'idle')
+  .map(a => `<span><span class="sw" style="background:var(--${a})"></span>${a}</span>`).join('')
+  + `<span><span class="sw sq" style="background:var(--house)"></span>house</span>`;
+
+let cell = 32, pad = 0;
+function resize() {
+  const w = canvas.parentElement.clientWidth - 16;
+  cell = Math.max(12, Math.floor(w / D.w));
+  const dpr = window.devicePixelRatio || 1;
+  // One extra row so labels under the bottom row fit.
+  canvas.width = D.w * cell * dpr; canvas.height = (D.h + 1) * cell * dpr;
+  canvas.style.width = D.w * cell + 'px'; canvas.style.height = (D.h + 1) * cell + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+
+function agentAt(i, k) { const a = F[i].a, o = k * A;
+  return { x: a[o] / 10, y: a[o + 1] / 10, act: a[o + 2], hunger: a[o + 3], money: a[o + 4], home: a[o + 5], job: a[o + 6] }; }
+
+function draw() {
+  const i = Math.floor(playhead), j = Math.min(i + 1, F.length - 1);
+  const f = daily ? 0 : playhead - i;
+  const W = D.w * cell, H = D.h * cell;
+  ctx.clearRect(0, 0, W, H + cell);
+  // Land price, faint.
+  if ($('landToggle').checked) {
+    const max = Math.max(...D.land), min = Math.min(...D.land), rgb = css('--land');
+    for (let y = 0; y < D.h; y++) for (let x = 0; x < D.w; x++) {
+      const v = (D.land[y * D.w + x] - min) / Math.max(1, max - min);
+      ctx.fillStyle = `rgba(${rgb}, ${0.05 + v * 0.35})`;
+      ctx.fillRect(x * cell, y * cell, cell, cell);
+    }
+  }
+  ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1; ctx.beginPath();
+  for (let x = 0; x <= D.w; x++) { ctx.moveTo(x * cell + .5, 0); ctx.lineTo(x * cell + .5, H); }
+  for (let y = 0; y <= D.h; y++) { ctx.moveTo(0, y * cell + .5); ctx.lineTo(W, y * cell + .5); }
+  ctx.stroke();
+
+  const fr = F[i];
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const label = (txt, x, y) => { ctx.fillStyle = css('--ink'); ctx.font = `${Math.max(9, cell * .32)}px system-ui`;
+    // Keep the label inside the canvas.
+    const half = ctx.measureText(txt).width / 2 + 2;
+    const cx = Math.min(Math.max((x + .5) * cell, half), W - half);
+    ctx.fillText(txt, cx, (y + 1) * cell + cell * .3); };
+  D.businesses.forEach((b, k) => {
+    ctx.fillStyle = css(goodColor(b.good));
+    ctx.fillRect(b.x * cell + 2, b.y * cell + 2, cell - 4, cell - 4);
+    ctx.fillStyle = '#fff'; ctx.font = `bold ${cell * .45}px system-ui`;
+    ctx.fillText(b.name[0].toUpperCase(), (b.x + .5) * cell, (b.y + .5) * cell);
+    label(`${b.name} ${fr.work[k]}/${b.slots}`, b.x, b.y);
+  });
+  D.houses.forEach((h, k) => {
+    const x = h.x * cell + 2, y = h.y * cell + 2, s = cell - 4;
+    ctx.fillStyle = css('--house'); ctx.globalAlpha = .15; ctx.fillRect(x, y, s, s);
+    ctx.globalAlpha = 1; ctx.lineWidth = 2;
+    ctx.strokeStyle = css('--house'); ctx.strokeRect(x + 1, y + 1, s - 2, s - 2); ctx.lineWidth = 1;
+    label(`${h.name} ${fr.ten[k]}/${h.beds} · rent ${fr.rent[k]}`, h.x, h.y);
+  });
+  if (selected && selected.type === 'agent') {
+    const a = agentAt(i, selected.id);
+    const mark = (p, color) => { if (!p) return; ctx.strokeStyle = color; ctx.lineWidth = 2;
+      ctx.strokeRect(p.x * cell + 1, p.y * cell + 1, cell - 2, cell - 2); ctx.lineWidth = 1; };
+    mark(a.home >= 0 && D.houses[a.home], css('--sel'));
+    mark(a.job >= 0 && D.businesses[a.job], css('--sel'));
+  }
+
+  // Agents: interpolated between frames, spread out when sharing a parcel.
+  const pos = [], groups = new Map();
+  for (let k = 0; k < N; k++) {
+    const a = agentAt(i, k), b = agentAt(j, k);
+    const x = a.x + (b.x - a.x) * f, y = a.y + (b.y - a.y) * f;
+    const key = Math.round(x) + ',' + Math.round(y);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(k);
+    pos[k] = { x, y, act: a.act };
+  }
+  const r = Math.max(2.5, cell * .11);
+  for (const ks of groups.values()) {
+    const n = ks.length, cols = Math.ceil(Math.sqrt(n));
+    ks.forEach((k, idx) => {
+      const p = pos[k];
+      const ox = n === 1 ? 0 : ((idx % cols) - (cols - 1) / 2) * r * 2.2;
+      const oy = n === 1 ? 0 : (Math.floor(idx / cols) - (Math.ceil(n / cols) - 1) / 2) * r * 2.2;
+      p.cx = (p.x + .5) * cell + ox; p.cy = (p.y + .5) * cell + oy;
+      ctx.beginPath(); ctx.arc(p.cx, p.cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = css('--' + D.actions[p.act]); ctx.fill();
+      ctx.strokeStyle = css('--panel'); ctx.lineWidth = 1; ctx.stroke();
+      if (selected && selected.type === 'agent' && selected.id === k) {
+        ctx.beginPath(); ctx.arc(p.cx, p.cy, r + 2, 0, Math.PI * 2);
+        ctx.strokeStyle = css('--sel'); ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1;
+      }
+    });
+  }
+  draw.pos = pos;
+
+  $('clock').textContent = fmtTime(Math.round(fr.t + (F[j].t - fr.t) * f));
+  $('seek').value = playhead;
+  const hungry = Array.from({ length: N }, (_, k) => agentAt(i, k).hunger).filter(h => h >= 800).length;
+  $('town').innerHTML = [
+    ['employed', `${fr.emp} / ${N}`], ['homeless', fr.homeless], ['hungry (≥800)', hungry],
+    ...D.businesses.map((b, k) => [`${b.good} price`, fr.price[k]]),
+  ].map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  showInfo(i);
+  drawHistory();
+}
+
+// History: employed, homeless and food price over the whole recording.
+const series = [
+  { name: 'employed', color: '--work', get: fr => fr.emp, max: N },
+  { name: 'homeless', color: '--house', get: fr => fr.homeless, max: N },
+  { name: `${D.businesses[D.businesses.length - 1].good} price`, color: '--eat', get: fr => fr.price[fr.price.length - 1] },
+];
+$('histLegend').innerHTML = series.map(s => `<span><span class="sw" style="background:var(${s.color})"></span>${s.name}</span>`).join('');
+const hist = $('hist'), hctx = hist.getContext('2d');
+function drawHistory() {
+  const w = hist.parentElement.clientWidth - 24, h = 130, dpr = window.devicePixelRatio || 1;
+  if (hist.width !== Math.round(w * dpr)) { hist.width = w * dpr; hist.height = h * dpr; hist.style.width = w + 'px'; hist.style.height = h + 'px'; }
+  hctx.setTransform(dpr, 0, 0, dpr, 0, 0); hctx.clearRect(0, 0, w, h);
+  const n = F.length, buckets = Math.min(n, Math.floor(w));
+  for (const s of series) {
+    const vals = []; for (let b = 0; b < buckets; b++) {
+      const lo = Math.floor(b * n / buckets), hi = Math.max(lo + 1, Math.floor((b + 1) * n / buckets));
+      let sum = 0; for (let k = lo; k < hi; k++) sum += s.get(F[k]); vals.push(sum / (hi - lo)); }
+    const max = s.max || Math.max(1, ...vals);
+    hctx.strokeStyle = css(s.color); hctx.lineWidth = 1.5; hctx.beginPath();
+    vals.forEach((v, b) => { const x = b / Math.max(1, buckets - 1) * w, y = h - 4 - v / max * (h - 8);
+      b ? hctx.lineTo(x, y) : hctx.moveTo(x, y); });
+    hctx.stroke();
+  }
+  const x = playhead / Math.max(1, n - 1) * w;
+  hctx.strokeStyle = css('--sel'); hctx.lineWidth = 1; hctx.beginPath(); hctx.moveTo(x, 0); hctx.lineTo(x, h); hctx.stroke();
+}
+hist.addEventListener('click', e => {
+  const r = hist.getBoundingClientRect();
+  playhead = Math.max(0, Math.min(F.length - 1, (e.clientX - r.left) / r.width * (F.length - 1)));
+  draw();
+});
+
+function showInfo(i) {
+  const el = $('info');
+  if (!selected) return;
+  const fr = F[i];
+  let rows = [];
+  if (selected.type === 'agent') {
+    const a = agentAt(i, selected.id);
+    rows = [['action', D.actions[a.act]], ['hunger', a.hunger], ['money', a.money],
+      ['home', a.home >= 0 ? D.houses[a.home].name : 'homeless'],
+      ['job', a.job >= 0 ? D.businesses[a.job].name : 'unemployed'],
+      ...D.traits.map((t, n) => [t, D.agentTraits[selected.id][n]])];
+    el.innerHTML = `<h2>Agent a${selected.id}</h2>`;
+  } else if (selected.type === 'house') {
+    const h = D.houses[selected.id];
+    rows = [['rent / day', fr.rent[selected.id]], ['tenants', `${fr.ten[selected.id]} / ${h.beds}`],
+      ['parcel', `(${h.x}, ${h.y})`], ['land price', D.land[h.y * D.w + h.x]]];
+    el.innerHTML = `<h2>House · ${h.name}</h2>`;
+  } else {
+    const b = D.businesses[selected.id];
+    rows = [['makes', b.good], ['price', fr.price[selected.id]], ['workers', `${fr.work[selected.id]} / ${b.slots}`],
+      ['parcel', `(${b.x}, ${b.y})`]];
+    el.innerHTML = `<h2>Business · ${b.name}</h2>`;
+  }
+  el.innerHTML += '<table>' + rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('') + '</table>';
+}
+
+canvas.addEventListener('click', e => {
+  const rect = canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  let best = null, bd = (cell * .3) ** 2;
+  (draw.pos || []).forEach((p, k) => { const d = (p.cx - mx) ** 2 + (p.cy - my) ** 2; if (d < bd) { bd = d; best = k; } });
+  if (best !== null) selected = { type: 'agent', id: best };
+  else {
+    const x = Math.floor(mx / cell), y = Math.floor(my / cell);
+    const h = D.houses.findIndex(h => h.x === x && h.y === y);
+    const b = D.businesses.findIndex(b => b.x === x && b.y === y);
+    selected = h >= 0 ? { type: 'house', id: h } : b >= 0 ? { type: 'business', id: b } : null;
+    if (!selected) $('info').innerHTML = '<h2>Selection</h2><div class="muted">Click an agent or a building.</div>';
+  }
+  draw();
+});
+
+function tick(ts) {
+  if (!playing) return;
+  const dt = last ? (ts - last) / 1000 : 0; last = ts;
+  playhead += dt * Number($('speed').value) / D.step;
+  if (playhead >= F.length - 1) { playhead = F.length - 1; playing = false; $('play').textContent = 'Play'; }
+  draw();
+  if (playing) requestAnimationFrame(tick);
+}
+$('play').onclick = () => {
+  playing = !playing; $('play').textContent = playing ? 'Pause' : 'Play';
+  if (playing) { if (playhead >= F.length - 1) playhead = 0; last = 0; requestAnimationFrame(tick); }
+};
+$('seek').oninput = e => { playhead = Number(e.target.value); draw(); };
+$('landToggle').onchange = draw;
+window.addEventListener('resize', resize);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw);
+resize();
+</script>
+</body>
+</html>

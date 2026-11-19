@@ -47,6 +47,18 @@ free bed against its own and against staying homeless (`[housing]` formulas),
 so people move closer to work when it pays. Without a home, sleep recovers at
 half the rate.
 
+To see the map, write a viewer and open it in a browser (no server needed).
+It plays back the whole run: agents coloured by action, houses with tenants
+and rent, a land-price layer, a history chart to jump around in, and details
+for any agent or building you click. The frame step adapts to the length of
+the run (about 4000 frames; daily or longer steps show noon); `--html-step`
+sets it, `--html-days N` limits the viewer to the last N days. A whole life
+of 80 years takes about 8 seconds:
+
+```bash
+cargo run --release -p timeloop-sim -- --years 80 --html map.html --quiet
+```
+
 With `--world FILE --watch` the rules are reloaded whenever the file changes,
 so behaviour can be tuned while a long run is going.
 
