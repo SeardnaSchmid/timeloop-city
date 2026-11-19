@@ -1,6 +1,6 @@
 [package]
 name = "timeloop-sim"
-description = "Headless-Simulator (CLI)"
+description = "Headless simulator (CLI)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

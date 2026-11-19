@@ -1,6 +1,6 @@
 [package]
 name = "timeloop-core"
-description = "Deterministische Simulation: Zustand, Zeit, Zufall, Hash"
+description = "Deterministic simulation: state, time, randomness, hash"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

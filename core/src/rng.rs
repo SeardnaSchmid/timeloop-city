@@ -1,9 +1,9 @@
-//! Zufall ohne Zustand: jeder Wurf ist `Hash(Seed, Agent, Ereignis-Nr.)`.
+//! Stateless randomness: every roll is `hash(seed, agent, event_no)`.
 //!
-//! Damit hängt kein Ergebnis davon ab, in welcher Reihenfolge Agents
-//! rechnen oder ob ein neues System zusätzliche Würfe macht.
+//! No result depends on the order in which agents are processed, or on
+//! whether a new system makes additional rolls.
 
-/// SplitMix64-Finalizer: gute Streuung, auf jeder Plattform gleich.
+/// SplitMix64 finalizer: good diffusion, identical on every platform.
 #[inline]
 const fn mix(mut z: u64) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
@@ -11,7 +11,7 @@ const fn mix(mut z: u64) -> u64 {
     z ^ (z >> 31)
 }
 
-/// Ein 64-Bit-Wurf für `agent` beim Ereignis `event` in der Welt `seed`.
+/// A 64-bit roll for `agent` at event `event` in the world `seed`.
 #[inline]
 pub const fn roll(seed: u64, agent: u32, event: u64) -> u64 {
     let a = mix(seed ^ 0x9e37_79b9_7f4a_7c15);
@@ -19,7 +19,7 @@ pub const fn roll(seed: u64, agent: u32, event: u64) -> u64 {
     mix(b ^ event)
 }
 
-/// Gleichverteilte Zahl in `0..n` (ohne Modulo-Verzerrung, Lemire).
+/// Uniform value in `0..n` without modulo bias (Lemire).
 #[inline]
 pub const fn below(seed: u64, agent: u32, event: u64, n: u32) -> u32 {
     let r = roll(seed, agent, event) >> 32;
@@ -54,8 +54,8 @@ mod tests {
         assert!(seen.iter().all(|&c| (850..1150).contains(&c)), "{seen:?}");
     }
 
-    /// Fester Wert: ändert sich nur, wenn sich der Algorithmus ändert.
-    /// Bricht dieser Test, laufen alte Speicherstände anders.
+    /// Pinned value: changes only if the algorithm changes.
+    /// If this test breaks, old save games will play out differently.
     #[test]
     fn known_value() {
         assert_eq!(roll(1, 0, 0), 0x179f_01f0_d2fb_a97a);

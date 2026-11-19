@@ -1,11 +1,11 @@
-//! Spielinhalte als TOML. Liefert fertige Konfigurationen für den Core.
+//! Game content as TOML. Produces ready-made configurations for the core.
 
 use std::{fmt, fs, path::Path};
 
 use serde::Deserialize;
 use timeloop_core::WorldConfig;
 
-/// Die mitgelieferte Standardwelt.
+/// The bundled default world.
 pub const DEFAULT_WORLD: &str = include_str!("../data/world.toml");
 
 #[derive(Debug, Deserialize)]
@@ -47,9 +47,9 @@ pub enum ContentError {
 impl fmt::Display for ContentError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io(e) => write!(f, "Datei nicht lesbar: {e}"),
-            Self::Parse(e) => write!(f, "TOML ungültig: {e}"),
-            Self::Invalid(m) => write!(f, "Wert ungültig: {m}"),
+            Self::Io(e) => write!(f, "cannot read file: {e}"),
+            Self::Parse(e) => write!(f, "invalid TOML: {e}"),
+            Self::Invalid(m) => write!(f, "invalid value: {m}"),
         }
     }
 }
@@ -60,12 +60,12 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
     let f: WorldFile = toml::from_str(text).map_err(ContentError::Parse)?;
     if f.economy.work_chance_permille > 1000 {
         return Err(ContentError::Invalid(
-            "economy.work_chance_permille muss 0–1000 sein".into(),
+            "economy.work_chance_permille must be 0-1000".into(),
         ));
     }
     if f.economy.meal_price <= 0 {
         return Err(ContentError::Invalid(
-            "economy.meal_price muss > 0 sein".into(),
+            "economy.meal_price must be > 0".into(),
         ));
     }
     Ok(WorldConfig {
@@ -83,7 +83,7 @@ pub fn load_world(path: &Path) -> Result<WorldConfig, ContentError> {
 }
 
 pub fn default_world() -> WorldConfig {
-    parse_world(DEFAULT_WORLD).expect("mitgelieferte world.toml ist gültig")
+    parse_world(DEFAULT_WORLD).expect("bundled world.toml is valid")
 }
 
 #[cfg(test)]

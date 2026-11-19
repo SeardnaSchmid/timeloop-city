@@ -1,6 +1,6 @@
 [package]
 name = "timeloop-content"
-description = "Spielinhalte als TOML und ihr Loader"
+description = "Game content as TOML and its loader"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

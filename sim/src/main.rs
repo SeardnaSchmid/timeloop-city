@@ -1,19 +1,19 @@
-//! Headless-Simulator: läuft ohne Grafik und gibt pro Spieltag den Zustands-Hash aus.
+//! Headless simulator: runs without graphics and prints the state hash per game day.
 //!
-//! Ausgabe ist bewusst stabil und zeilenweise, damit CI zwei Läufe
-//! (oder zwei Plattformen) mit `diff` vergleichen kann.
+//! The output is deliberately stable and line-based so CI can compare two runs
+//! (or two platforms) with `diff`.
 
 use std::{path::PathBuf, process::ExitCode};
 
 use timeloop_core::{StateHash, World};
 
 const USAGE: &str = "\
-Aufruf: sim [--seed N] [--days N] [--world DATEI] [--quiet]
+Usage: sim [--seed N] [--days N] [--world FILE] [--quiet]
 
-  --seed N       Welt-Seed (Standard 1)
-  --days N       Anzahl Spieltage (Standard 1)
-  --world DATEI  eigene world.toml statt der mitgelieferten
-  --quiet        nur den End-Hash ausgeben";
+  --seed N       world seed (default 1)
+  --days N       number of game days (default 1)
+  --world FILE   custom world.toml instead of the bundled one
+  --quiet        print only the final hash";
 
 struct Args {
     seed: u64,
@@ -30,7 +30,7 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
         quiet: false,
     };
     while let Some(flag) = it.next() {
-        let mut value = |name: &str| it.next().ok_or(format!("{name} braucht einen Wert"));
+        let mut value = |name: &str| it.next().ok_or(format!("{name} needs a value"));
         match flag.as_str() {
             "--seed" => {
                 a.seed = value("--seed")?
@@ -45,7 +45,7 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
             "--world" => a.world = Some(value("--world")?.into()),
             "--quiet" => a.quiet = true,
             "-h" | "--help" => return Err(String::new()),
-            other => return Err(format!("unbekannte Option: {other}")),
+            other => return Err(format!("unknown option: {other}")),
         }
     }
     Ok(a)

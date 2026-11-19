@@ -1,7 +1,7 @@
-//! Plattformunabhängiger Zustands-Hash (FNV-1a, 64 Bit).
+//! Platform-independent state hash (FNV-1a, 64 bit).
 //!
-//! Bewusst nicht `std::hash`: dessen Ausgabe ist zwischen Rust-Versionen
-//! nicht garantiert. Zahlen werden immer als Little-Endian geschrieben.
+//! Deliberately not `std::hash`: its output is not guaranteed to be stable
+//! across Rust versions. Numbers are always written little-endian.
 
 const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -35,7 +35,7 @@ impl StateHasher {
         self.write_bytes(&v.to_le_bytes());
     }
 
-    /// Länge zuerst, damit `[1,2]+[3]` und `[1]+[2,3]` verschieden hashen.
+    /// Length first, so `[1,2]+[3]` and `[1]+[2,3]` hash differently.
     pub fn write_u32_slice(&mut self, v: &[u32]) {
         self.write_u64(v.len() as u64);
         v.iter().for_each(|&x| self.write_u32(x));
@@ -51,7 +51,7 @@ impl StateHasher {
     }
 }
 
-/// Alles, was zum Weltzustand gehört, schreibt sich hier vollständig hinein.
+/// Everything that belongs to the world state writes itself in here, completely.
 pub trait StateHash {
     fn hash_into(&self, h: &mut StateHasher);
 

@@ -22,7 +22,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
-  # Zwei Läufe pro Plattform müssen identisch sein.
+  # Two runs per platform must be identical.
   determinism:
     strategy:
       fail-fast: false
@@ -45,7 +45,7 @@ jobs:
           name: hashes-${{ matrix.os }}
           path: run-a.txt
 
-  # x86 und ARM, Linux, Mac und Windows müssen dieselbe Welt rechnen.
+  # x86 and ARM, Linux, macOS and Windows must compute the same world.
   cross-platform:
     needs: determinism
     runs-on: ubuntu-latest
@@ -53,10 +53,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: hashes
-      - name: Alle Plattformen gleich
+      - name: All platforms match
         run: |
           ref=hashes/hashes-ubuntu-latest/run-a.txt
           for f in hashes/*/run-a.txt; do
-            echo "vergleiche $f"
+            echo "comparing $f"
             diff "$ref" "$f"
           done

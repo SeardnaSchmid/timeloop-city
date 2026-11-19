@@ -1,30 +1,30 @@
-//! Weltzustand als dichte Arrays: Index = Agent-ID.
+//! World state as dense arrays: index = agent ID.
 //!
-//! Iteration 0 ist ein Platzhalter: ein Tag läuft als ein Block, damit der
-//! Hash etwas zu prüfen hat. Ab Iteration 1 ersetzt die Ereignis-Queue
+//! Iteration 0 is a placeholder: a day runs as one block so the hash has
+//! something to check. From iteration 1 on, the event queue replaces
 //! `step_day`.
 
 use crate::hash::{StateHash, StateHasher};
 use crate::rng;
 
-/// Spielminuten seit Weltbeginn.
+/// Game minutes since the world began.
 pub type Minute = u64;
 pub const MINUTES_PER_DAY: Minute = 24 * 60;
 
-/// Bedürfnisse liegen in `0..=NEED_MAX`.
+/// Needs live in `0..=NEED_MAX`.
 pub const NEED_MAX: u32 = 1000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorldConfig {
     pub agents: u32,
     pub start_money: i64,
-    /// Hunger-Anstieg pro Spielstunde.
+    /// Hunger increase per game hour.
     pub hunger_per_hour: u32,
-    /// Was eine Mahlzeit kostet.
+    /// Price of one meal.
     pub meal_price: i64,
-    /// Tageslohn, falls der Agent heute Arbeit findet.
+    /// Daily wage if the agent finds work today.
     pub daily_wage: i64,
-    /// Chance auf Arbeit pro Tag in Promille.
+    /// Chance of finding work per day, in per mille.
     pub work_chance_permille: u32,
 }
 
@@ -35,7 +35,7 @@ pub struct World {
     config: WorldConfig,
     hunger: Vec<u32>,
     money: Vec<i64>,
-    /// Laufende Ereignis-Nr. pro Agent, Eingang für [`rng::roll`].
+    /// Running event number per agent, input to [`rng::roll`].
     event_no: Vec<u64>,
 }
 
@@ -83,7 +83,7 @@ impl World {
         v
     }
 
-    /// Platzhalter-Tag: arbeiten (vielleicht), hungrig werden, essen wenn möglich.
+    /// Placeholder day: maybe work, get hungry, eat if affordable.
     pub fn step_day(&mut self) {
         let c = self.config.clone();
         for agent in 0..c.agents {

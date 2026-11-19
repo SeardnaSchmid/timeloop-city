@@ -1,19 +1,19 @@
-# City Timeloop
+# Timeloop City
 
-Deterministische Stadtsimulation in Rust. Architektur und Plan:
+Deterministic city simulation in Rust. Architecture and roadmap (German):
 [Ages of Echo – Simulationsarchitektur](https://claude.ai/artifact/19Ga4YdpNxdwEtXZWZ2ysa).
 
-| Crate | Inhalt |
+| Crate | Contents |
 | --- | --- |
-| `core` | Weltzustand (dichte Arrays), Zufall per Hash, Zustands-Hash |
-| `content` | Spielinhalte als TOML (`content/data/`) |
-| `sim` | Headless-Simulator (CLI) |
+| `core` | World state (dense arrays), hash-based randomness, state hash |
+| `content` | Game content as TOML (`content/data/`) |
+| `sim` | Headless simulator (CLI) |
 
 ```bash
 cargo run --release -p timeloop-sim -- --seed 1 --days 10
 ```
 
-Jede Zeile ist `day <n> <hash>`. Gleicher Seed muss auf jeder Plattform
-dieselben Hashes liefern; CI prüft das auf Linux (x86, ARM), macOS und Windows.
+Each line is `day <n> <hash>`. The same seed must produce the same hashes on
+every platform; CI checks this on Linux (x86, ARM), macOS and Windows.
 
-Regeln für den Core: nur Ganzzahlen, Zufall nur über `rng`, Iteration nur nach ID.
+Core rules: integers only, randomness only through `rng`, iteration only in ID order.

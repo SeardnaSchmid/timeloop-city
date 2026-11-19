@@ -1,7 +1,7 @@
-//! Deterministischer Simulationskern.
+//! Deterministic simulation core.
 //!
-//! Regeln: nur Ganzzahlen, Zufall nur über [`rng`], Iteration nur nach
-//! Entity-ID. Gleicher Seed + gleiche Eingaben = gleicher [`world::World::state_hash`].
+//! Rules: integers only, randomness only through [`rng`], iteration only in
+//! entity-ID order. Same seed + same inputs = same [`world::World::state_hash`].
 
 pub mod hash;
 pub mod rng;
