@@ -303,6 +303,7 @@ fn csv_header(world: &World) -> String {
         "day".to_string(),
         "money_agents".into(),
         "money_businesses".into(),
+        "money_total".into(),
     ];
     cols.extend(c.businesses.iter().map(|b| format!("price_{}", b.name)));
     cols.extend(c.businesses.iter().map(|b| format!("wage_{}", b.name)));
@@ -359,6 +360,7 @@ fn csv_row(
         day.to_string(),
         s.money_agents.to_string(),
         s.money_businesses.to_string(),
+        s.money_total.to_string(),
     ];
     cols.extend(s.prices[..town].iter().map(i64::to_string));
     cols.extend(s.wages[..town].iter().map(i64::to_string));

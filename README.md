@@ -20,7 +20,7 @@ change the population:
 cargo run --release -p timeloop-sim -- --agents 1 --days 2 --log
 ```
 
-Add `--stats FILE` to write one CSV row per day (money, prices, wages, cash,
+Add `--stats FILE` to write one CSV row per day (money of agents, businesses and in total, prices, wages, cash,
 staff, stock, employment, hunger, meals, work hours, money Gini, share of
 time spent starving, rent and tenants per house, homeless, mean commute,
 founded firms open / founded / closed, money held by firm owners):

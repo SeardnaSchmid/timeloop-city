@@ -296,6 +296,8 @@ pub struct Stats {
     pub minute: Minute,
     pub money_agents: i64,
     pub money_businesses: i64,
+    /// All money in the world: agents, businesses and houses. Constant.
+    pub money_total: i64,
     /// Output price per business, in business order.
     pub prices: Vec<i64>,
     /// Wage per business, in business order.
@@ -596,6 +598,7 @@ impl World {
             minute: self.now,
             money_agents: self.money.iter().sum(),
             money_businesses: e.total_cash(),
+            money_total: self.money_supply(),
             prices: (0..e.len()).map(|b| e.price(b)).collect(),
             wages: (0..e.len()).map(|b| e.wage(b)).collect(),
             cash: (0..e.len()).map(|b| e.cash(b)).collect(),

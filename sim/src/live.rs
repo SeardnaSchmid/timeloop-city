@@ -163,14 +163,15 @@ impl Live {
         let mut t = String::new();
         let _ = write!(
             t,
-            "{{\"now\":{},\"hash\":\"{:016x}\",\"seed\":{},\"epoch\":{},\"days\":{},\"employed\":{},\"homeless\":{},\"agents\":[",
+            "{{\"now\":{},\"hash\":\"{:016x}\",\"seed\":{},\"epoch\":{},\"days\":{},\"employed\":{},\"homeless\":{},\"money\":{},\"agents\":[",
             w.now(),
             w.state_hash(),
             self.seed,
             self.epoch,
             self.history.len() / HISTORY_FIELDS,
             s.employed,
-            s.homeless
+            s.homeless,
+            s.money_total
         );
         for a in 0..w.agent_count() {
             let (x, y) = w.position_tenths(a);

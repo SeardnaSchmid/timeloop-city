@@ -248,7 +248,7 @@ function draw() {
   const goods = [...new Set(w.businesses.map(b => b.good))];
   const cheapest = g => Math.min(...w.businesses.filter(b => b.open && b.good === g).map(b => b.price));
   $('town').innerHTML = [['employed', `${w.employed} / ${L.agents}`], ['homeless', w.homeless], ['hungry (≥800)', hungry],
-    ['founded firms open', w.firms],
+    ['founded firms open', w.firms], ['money in the world', w.money],
     ...goods.map(g => [`${g} price (lowest)`, isFinite(cheapest(g)) ? cheapest(g) : '–'])]
     .map(([k, v]) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`).join('');
   showInfo();
