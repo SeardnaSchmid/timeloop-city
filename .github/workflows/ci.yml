@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  SIM_ARGS: --seed 1 --days 3650
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.93.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  # Zwei Läufe pro Plattform müssen identisch sein.
+  determinism:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.93.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p timeloop-sim
+      - run: ./target/release/sim $SIM_ARGS > run-a.txt
+      - run: ./target/release/sim $SIM_ARGS > run-b.txt
+      - run: diff run-a.txt run-b.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hashes-${{ matrix.os }}
+          path: run-a.txt
+
+  # x86 und ARM, Linux, Mac und Windows müssen dieselbe Welt rechnen.
+  cross-platform:
+    needs: determinism
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: hashes
+      - name: Alle Plattformen gleich
+        run: |
+          ref=hashes/hashes-ubuntu-latest/run-a.txt
+          for f in hashes/*/run-a.txt; do
+            echo "vergleiche $f"
+            diff "$ref" "$f"
+          done

@@ -1,0 +1,15 @@
+[package]
+name = "timeloop-sim"
+description = "Headless-Simulator (CLI)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "sim"
+path = "src/main.rs"
+
+[dependencies]
+timeloop-core.workspace = true
+timeloop-content.workspace = true

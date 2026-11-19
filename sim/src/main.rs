@@ -1,0 +1,88 @@
+//! Headless-Simulator: läuft ohne Grafik und gibt pro Spieltag den Zustands-Hash aus.
+//!
+//! Ausgabe ist bewusst stabil und zeilenweise, damit CI zwei Läufe
+//! (oder zwei Plattformen) mit `diff` vergleichen kann.
+
+use std::{path::PathBuf, process::ExitCode};
+
+use timeloop_core::{StateHash, World};
+
+const USAGE: &str = "\
+Aufruf: sim [--seed N] [--days N] [--world DATEI] [--quiet]
+
+  --seed N       Welt-Seed (Standard 1)
+  --days N       Anzahl Spieltage (Standard 1)
+  --world DATEI  eigene world.toml statt der mitgelieferten
+  --quiet        nur den End-Hash ausgeben";
+
+struct Args {
+    seed: u64,
+    days: u64,
+    world: Option<PathBuf>,
+    quiet: bool,
+}
+
+fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
+    let mut a = Args {
+        seed: 1,
+        days: 1,
+        world: None,
+        quiet: false,
+    };
+    while let Some(flag) = it.next() {
+        let mut value = |name: &str| it.next().ok_or(format!("{name} braucht einen Wert"));
+        match flag.as_str() {
+            "--seed" => {
+                a.seed = value("--seed")?
+                    .parse()
+                    .map_err(|e| format!("--seed: {e}"))?
+            }
+            "--days" => {
+                a.days = value("--days")?
+                    .parse()
+                    .map_err(|e| format!("--days: {e}"))?
+            }
+            "--world" => a.world = Some(value("--world")?.into()),
+            "--quiet" => a.quiet = true,
+            "-h" | "--help" => return Err(String::new()),
+            other => return Err(format!("unbekannte Option: {other}")),
+        }
+    }
+    Ok(a)
+}
+
+fn main() -> ExitCode {
+    let args = match parse_args(std::env::args().skip(1)) {
+        Ok(a) => a,
+        Err(msg) => {
+            if !msg.is_empty() {
+                eprintln!("{msg}\n");
+            }
+            eprintln!("{USAGE}");
+            return ExitCode::from(if msg.is_empty() { 0 } else { 2 });
+        }
+    };
+
+    let config = match &args.world {
+        Some(path) => match timeloop_content::load_world(path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("{}: {e}", path.display());
+                return ExitCode::from(1);
+            }
+        },
+        None => timeloop_content::default_world(),
+    };
+
+    let mut world = World::new(args.seed, config);
+    for _ in 0..args.days {
+        world.step_day();
+        if !args.quiet {
+            println!("day {:>6} {:016x}", world.day(), world.state_hash());
+        }
+    }
+    if args.quiet {
+        println!("{:016x}", world.state_hash());
+    }
+    ExitCode::SUCCESS
+}

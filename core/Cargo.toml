@@ -1,0 +1,9 @@
+[package]
+name = "timeloop-core"
+description = "Deterministische Simulation: Zustand, Zeit, Zufall, Hash"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]

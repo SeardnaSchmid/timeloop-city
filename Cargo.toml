@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = ["core", "sim", "content"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.93"
+license = "MIT"
+
+[workspace.dependencies]
+timeloop-core = { path = "core" }
+timeloop-content = { path = "content" }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+[profile.release]
+debug = 1

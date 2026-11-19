@@ -1,0 +1,15 @@
+# Platzhalter-Welt für Iteration 0. Alle Werte ganzzahlig.
+
+[world]
+agents = 50
+start_money = 20
+
+[needs]
+# Anstieg pro Spielstunde, Skala 0–1000
+hunger_per_hour = 20
+
+[economy]
+meal_price = 3
+daily_wage = 8
+# Chance auf Arbeit pro Tag in Promille
+work_chance_permille = 700
