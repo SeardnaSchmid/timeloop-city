@@ -1,0 +1,358 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WorldFile",
+  "description": "A world definition: population, goods, businesses and behaviour tuning.\nAll numbers are integers; needs use a 0-1000 scale.",
+  "type": "object",
+  "properties": {
+    "business": {
+      "description": "Businesses in ID order. Order matters: ties go to the lower ID.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/BusinessSection"
+      }
+    },
+    "goods": {
+      "$ref": "#/$defs/GoodsSection"
+    },
+    "market": {
+      "$ref": "#/$defs/MarketSection"
+    },
+    "meal": {
+      "$ref": "#/$defs/MealSection"
+    },
+    "needs": {
+      "$ref": "#/$defs/NeedsSection"
+    },
+    "wander": {
+      "$ref": "#/$defs/WanderSection"
+    },
+    "work": {
+      "$ref": "#/$defs/WorkSection"
+    },
+    "world": {
+      "$ref": "#/$defs/WorldSection"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "world",
+    "goods",
+    "business",
+    "market",
+    "needs",
+    "meal",
+    "work",
+    "wander"
+  ],
+  "$defs": {
+    "BusinessSection": {
+      "type": "object",
+      "properties": {
+        "cash": {
+          "description": "Starting cash.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "input": {
+          "description": "Input consumed per unit of output. Omit for raw producers (fields, mines).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InputSection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input_target": {
+          "description": "Input stock the business restocks to every morning.",
+          "type": "integer",
+          "format": "uint32",
+          "default": 0,
+          "minimum": 0
+        },
+        "name": {
+          "type": "string"
+        },
+        "output": {
+          "description": "Good this business produces and sells.",
+          "type": "string"
+        },
+        "output_milli_per_worker_hour": {
+          "description": "Output per worker-hour in thousandths of a unit (1500 = 1.5 units).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "output_target": {
+          "description": "Output stock the business aims for. Below it the price rises, above twice it falls.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "price": {
+          "description": "Starting price per unit of output.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "slots": {
+          "description": "Maximum number of workers.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "stock": {
+          "description": "Output units in stock at the start.",
+          "type": "integer",
+          "format": "uint32",
+          "default": 0,
+          "minimum": 0
+        },
+        "wage": {
+          "description": "Starting wage per worker-hour.",
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "output",
+        "output_milli_per_worker_hour",
+        "slots",
+        "cash",
+        "price",
+        "wage",
+        "output_target"
+      ]
+    },
+    "FatigueSection": {
+      "type": "object",
+      "properties": {
+        "per_hour": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "recovery_per_hour": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "sleep_at": {
+          "description": "Sleep at any hour from here on; at night agents already sleep from 200.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "per_hour",
+        "sleep_at",
+        "recovery_per_hour"
+      ]
+    },
+    "GoodsSection": {
+      "type": "object",
+      "properties": {
+        "food": {
+          "description": "The good agents buy and eat.",
+          "type": "string"
+        },
+        "names": {
+          "description": "All goods, by name.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "names",
+        "food"
+      ]
+    },
+    "HungerSection": {
+      "type": "object",
+      "properties": {
+        "critical": {
+          "description": "Interrupts the current action to go eat.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "eat_at": {
+          "description": "Agents eat from this hunger on, if they can buy food.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "per_hour": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "per_hour",
+        "eat_at",
+        "critical"
+      ]
+    },
+    "InputSection": {
+      "type": "object",
+      "properties": {
+        "amount": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "good": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "good",
+        "amount"
+      ]
+    },
+    "MarketSection": {
+      "type": "object",
+      "properties": {
+        "price_min": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "price_step": {
+          "description": "Daily price change when stock is off target.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "reserve_days": {
+          "description": "Days of full payroll kept in cash. Below it wages fall, above twice it they rise.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "wage_min": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "wage_step": {
+          "description": "Daily wage change when cash is off target.",
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "price_step",
+        "price_min",
+        "wage_step",
+        "wage_min",
+        "reserve_days"
+      ]
+    },
+    "MealSection": {
+      "type": "object",
+      "properties": {
+        "minutes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "relief": {
+          "description": "Hunger removed by one meal.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "relief",
+        "minutes"
+      ]
+    },
+    "NeedsSection": {
+      "type": "object",
+      "properties": {
+        "fatigue": {
+          "$ref": "#/$defs/FatigueSection"
+        },
+        "hunger": {
+          "$ref": "#/$defs/HungerSection"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "hunger",
+        "fatigue"
+      ]
+    },
+    "WanderSection": {
+      "type": "object",
+      "properties": {
+        "max_minutes": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "min_minutes": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "min_minutes",
+        "max_minutes"
+      ]
+    },
+    "WorkSection": {
+      "type": "object",
+      "properties": {
+        "end_hour": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "start_hour": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "start_hour",
+        "end_hour"
+      ]
+    },
+    "WorldSection": {
+      "type": "object",
+      "properties": {
+        "agents": {
+          "description": "Number of agents.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "start_money": {
+          "description": "Money each agent starts with.",
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "agents",
+        "start_money"
+      ]
+    }
+  }
+}

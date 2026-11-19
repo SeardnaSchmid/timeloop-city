@@ -1,8 +1,57 @@
-# Default world. All values are integers; needs use a 0-1000 scale.
+#:schema ../schema/world.schema.json
+# Bread town: field -> mill -> bakery. All values are integers; needs use a 0-1000 scale.
 
 [world]
 agents = 50
-start_money = 20
+start_money = 200
+
+[goods]
+names = ["grain", "flour", "bread"]
+food = "bread"
+
+[[business]]
+name = "field"
+output = "grain"
+output_milli_per_worker_hour = 750
+slots = 22
+cash = 3000
+price = 15
+wage = 10
+stock = 200
+output_target = 100
+
+[[business]]
+name = "mill"
+output = "flour"
+input = { good = "grain", amount = 1 }
+output_milli_per_worker_hour = 1500
+slots = 12
+cash = 3000
+price = 25
+wage = 10
+stock = 200
+output_target = 100
+input_target = 200
+
+[[business]]
+name = "bakery"
+output = "bread"
+input = { good = "flour", amount = 1 }
+output_milli_per_worker_hour = 1500
+slots = 12
+cash = 3000
+price = 35
+wage = 10
+stock = 150
+output_target = 100
+input_target = 200
+
+[market]
+price_step = 1
+price_min = 1
+wage_step = 1
+wage_min = 5
+reserve_days = 3
 
 [needs.hunger]
 per_hour = 40
@@ -17,12 +66,10 @@ sleep_at = 700
 recovery_per_hour = 80
 
 [meal]
-price = 3
 relief = 300
 minutes = 30
 
 [work]
-hourly_wage = 2
 start_hour = 8
 end_hour = 18
 
