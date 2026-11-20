@@ -7,6 +7,7 @@ use timeloop_core::{World, MINUTES_PER_DAY};
 const SEEDS: [u64; 6] = [1, 2, 3, 4, 5, 6];
 
 #[test]
+#[ignore = "long run; CI runs it with --include-ignored"]
 fn experience_pays_and_prices_settle() {
     let (mut swings, mut days, mut starving) = (0i64, 0i64, 0u64);
     let (mut money_low, mut money_high) = (0i64, 0i64);

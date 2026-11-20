@@ -62,6 +62,7 @@ fn run(seed: u64, config: WorldConfig) -> (Vec<(u64, i64)>, u32) {
 }
 
 #[test]
+#[ignore = "long run; CI runs it with --include-ignored"]
 fn traits_change_work_hours_and_wealth() {
     for seed in [1, 2, 3] {
         let (groups, gini_mixed) = run(

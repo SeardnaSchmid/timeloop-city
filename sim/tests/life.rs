@@ -5,6 +5,7 @@
 use timeloop_core::{Stage, World, DAYS_PER_YEAR};
 
 #[test]
+#[ignore = "long run; CI runs it with --include-ignored"]
 fn eighty_years_of_generations() {
     let mut w = World::new(1, timeloop_content::default_world());
     let supply = w.money_supply();

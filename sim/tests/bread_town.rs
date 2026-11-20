@@ -10,6 +10,7 @@ const DAYS: u64 = 3650;
 const SEEDS: [u64; 6] = [1, 2, 3, 4, 5, 6];
 
 #[test]
+#[ignore = "long run; CI runs it with --include-ignored"]
 fn ten_years_stay_fed_and_balanced() {
     let mut total_starving = 0;
     for seed in SEEDS {

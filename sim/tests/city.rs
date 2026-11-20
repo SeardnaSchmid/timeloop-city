@@ -7,6 +7,7 @@ const YEAR: u64 = 365;
 const DAYS: u64 = 10 * YEAR;
 
 #[test]
+#[ignore = "long run; CI runs it with --include-ignored"]
 fn rents_settle_and_people_move_closer_to_work() {
     for seed in [1, 2, 3] {
         // A town of fixed size and houses, so rents per house compare.

@@ -37,6 +37,8 @@ Usage: sim [OPTIONS]
   --quiet        print only the final hash
   --report       print a yearly table of how the town grows and what holds it
                  back, instead of the daily hashes
+  --snapshots DIR  like --report, cut at years 1, 2, 3, 5, 10, 15, ...;
+                 writes periods.csv, map_yNN.txt and agents_yNN.csv to DIR
 
 serve runs the engine live (default 80 years, port 7878) and serves a page
 to steer and watch it at http://127.0.0.1:PORT.
@@ -57,6 +59,7 @@ struct Args {
     log: bool,
     quiet: bool,
     report: bool,
+    snapshots: Option<PathBuf>,
     explain: Option<(u32, Minute)>,
     serve: bool,
     port: u16,
@@ -89,6 +92,7 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
         log: false,
         quiet: false,
         report: false,
+        snapshots: None,
         explain: None,
         serve: false,
         port: 7878,
@@ -127,6 +131,7 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
             "--log" => a.log = true,
             "--quiet" => a.quiet = true,
             "--report" => a.report = true,
+            "--snapshots" => a.snapshots = Some(PathBuf::from(value("--snapshots")?)),
             "-h" | "--help" => return Err(String::new()),
             other => return Err(format!("unknown option: {other}")),
         }
@@ -222,7 +227,10 @@ fn run(args: &Args, mut world: World) -> io::Result<()> {
         let start = (args.days - days) * MINUTES_PER_DAY;
         viewer::Recorder::new(start, days * MINUTES_PER_DAY, args.html_step)
     });
-    let mut report = args.report.then(|| report::Report::new(args.days));
+    let mut report = match &args.snapshots {
+        Some(dir) => Some(report::Report::snapshots(args.days, dir)?),
+        None => args.report.then(|| report::Report::new(args.days)),
+    };
     if let Some(r) = &report {
         r.header(&mut out)?;
     }

@@ -29,6 +29,18 @@ sleepers, beds, town branches and houses, and what blocks new branches:
 cargo run --release -p timeloop-sim -- --years 3 --report
 ```
 
+`--snapshots DIR` does the same at years 1, 2, 3, 5, 10, 15, ... and writes
+`periods.csv` (one row per cut, Excel-ready), the map as text
+(`map_yNN.txt`) and every agent (`agents_yNN.csv`). 30 years of 100 agents
+take about 15 seconds:
+
+```bash
+cargo run --release -p timeloop-sim -- --years 30 --snapshots out
+```
+
+`cargo test` runs the fast tests only; the long acceptance runs are
+`#[ignore]`d and run in CI (`cargo test -- --include-ignored`).
+
 Add `--stats FILE` to write one CSV row per day (money of agents, businesses and in total, prices, wages, cash,
 staff, stock, employment, hunger, meals, work hours, money Gini, share of
 time spent starving, rent and tenants per house, homeless, mean commute,

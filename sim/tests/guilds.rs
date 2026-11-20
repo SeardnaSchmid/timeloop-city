@@ -23,6 +23,7 @@ fn mean_price_index(config: &WorldConfig) -> i64 {
 }
 
 #[test]
+#[ignore = "long run; CI runs it with --include-ignored"]
 fn a_guild_minimum_price_raises_the_price_index() {
     let with_rule = timeloop_content::default_world();
     let guild = (with_rule.associations.iter())

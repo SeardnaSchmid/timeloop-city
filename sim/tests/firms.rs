@@ -8,6 +8,7 @@ const YEARS: u64 = 20;
 const SEEDS: [u64; 6] = [1, 2, 3, 4, 5, 6];
 
 #[test]
+#[ignore = "long run; CI runs it with --include-ignored"]
 fn founders_fill_market_gaps_and_the_town_stays_fed() {
     let (mut total_starving, mut total_owners, mut supply) = (0, 0, 0);
     let mut total_firms = 0;

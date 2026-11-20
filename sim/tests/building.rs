@@ -9,6 +9,7 @@ const YEARS: u64 = 30;
 const SEEDS: [u64; 6] = [1, 2, 3, 4, 5, 6];
 
 #[test]
+#[ignore = "long run; CI runs it with --include-ignored"]
 fn the_town_builds_grows_and_buys_new_goods() {
     // Calibrated for 50 people; the default world now starts with more.
     let mut start = timeloop_content::default_world();
