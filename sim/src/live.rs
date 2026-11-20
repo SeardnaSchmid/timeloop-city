@@ -347,6 +347,145 @@ impl Live {
     }
 }
 
+/// The rules of the running world as JSON, for the rules page: goods,
+/// who makes them from what, which needs they cover, and every decision
+/// rule with its formulas.
+pub fn rules_json(w: &World) -> String {
+    let c = w.config();
+    let b = &c.behaviour;
+    let s = json_string;
+    let f =
+        |x: &Option<timeloop_core::Formula>| x.as_ref().map_or("null".into(), |x| s(x.source()));
+    let mut t = String::from("{\"goods\":[");
+    for (i, g) in c.goods.iter().enumerate() {
+        let _ = write!(t, "{}{}", if i > 0 { "," } else { "" }, s(g));
+    }
+    let _ = write!(
+        t,
+        "],\"food\":{},\"meal_relief\":{},\"comfort\":[",
+        c.food, c.meal_relief
+    );
+    for (i, (g, r)) in c.comfort_goods.iter().enumerate() {
+        let _ = write!(t, "{}[{g},{r}]", if i > 0 { "," } else { "" });
+    }
+    t.push_str("],\"makers\":[");
+    let makers = c
+        .businesses
+        .iter()
+        .map(|m| (m, true))
+        .chain(c.recipes.iter().map(|m| (m, false)));
+    for (i, (m, town)) in makers.enumerate() {
+        let input = m
+            .input
+            .as_ref()
+            .map_or("null".into(), |x| format!("[{},{}]", x.good, x.amount));
+        let _ = write!(
+            t,
+            "{}{{\"name\":{},\"town\":{town},\"output\":{},\"input\":{input},\"per_hour_milli\":{},\"slots\":{},\"price\":{},\"wage\":{},\"cash\":{}}}",
+            if i > 0 { "," } else { "" },
+            s(&m.name),
+            m.output,
+            m.output_milli_per_worker_hour,
+            m.slots,
+            m.start_price,
+            m.start_wage,
+            m.start_cash
+        );
+    }
+    t.push_str("],\"actions\":[");
+    for (i, a) in b.actions.iter().enumerate() {
+        let _ = write!(
+            t,
+            "{}{{\"kind\":{},\"when\":{},\"score\":{}}}",
+            if i > 0 { "," } else { "" },
+            s(a.kind.name()),
+            f(&a.when),
+            s(a.score.source())
+        );
+    }
+    let _ = write!(
+        t,
+        "],\"needs\":{{\"hunger\":{{\"per_hour\":{},\"critical\":{},\"meal_relief\":{},\"meal_minutes\":{}}},\"fatigue\":{{\"per_hour\":{},\"recovery_per_hour\":{},\"max_sleep_minutes\":{}}},\"safety\":{{\"reserve_days\":{},\"meals_per_day\":{}}},\"comfort\":{{\"per_hour\":{},\"buy_at\":{},\"spend_permille\":{}}}}}",
+        c.hunger_per_hour,
+        c.hunger_critical,
+        c.meal_relief,
+        c.meal_minutes,
+        c.fatigue_per_hour,
+        c.sleep_recovery_per_hour,
+        c.max_sleep_minutes,
+        b.safety_reserve_days,
+        b.meals_per_day,
+        b.comfort_per_hour,
+        b.comfort_buy_at,
+        b.comfort_spend_permille
+    );
+    let h = &b.housing;
+    let _ = write!(
+        t,
+        ",\"housing\":{{\"when\":{},\"score\":{},\"homeless_score\":{}}}",
+        f(&h.when),
+        s(h.score.source()),
+        s(h.homeless_score.source())
+    );
+    match &b.founding {
+        Some(r) => {
+            let _ = write!(
+                t,
+                ",\"founding\":{{\"when\":{},\"score\":{},\"close\":{},\"capital\":{},\"profit_tax_percent\":{},\"max_firms\":{}}}",
+                f(&r.when),
+                s(r.score.source()),
+                s(r.close_when.source()),
+                r.capital,
+                r.profit_tax_percent,
+                r.max_firms
+            );
+        }
+        None => t.push_str(",\"founding\":null"),
+    }
+    match &b.building {
+        Some(r) => {
+            let _ = write!(
+                t,
+                ",\"building\":{{\"when\":{},\"score\":{},\"cost\":{},\"beds\":{},\"rent\":{},\"construction_days\":{},\"max_houses\":{}}}",
+                f(&r.when),
+                s(r.score.source()),
+                r.cost,
+                r.beds,
+                r.start_rent,
+                r.construction_days,
+                r.max_houses
+            );
+        }
+        None => t.push_str(",\"building\":null"),
+    }
+    let m = &c.market;
+    let _ = write!(
+        t,
+        ",\"market\":{{\"price_change_percent\":{},\"price_min\":{},\"wage_step\":{},\"wage_min\":{},\"reserve_days\":{}}}",
+        m.price_change_percent, m.price_min, m.wage_step, m.wage_min, m.reserve_days
+    );
+    match &c.growth {
+        Some(g) => {
+            let _ = write!(
+                t,
+                ",\"growth\":{{\"max_agents\":{},\"arrivals_per_day\":{}}}",
+                g.max_agents, g.arrivals_per_day
+            );
+        }
+        None => t.push_str(",\"growth\":null"),
+    }
+    let _ = write!(
+        t,
+        ",\"agents\":{},\"start_money\":{},\"traits\":[",
+        c.agents, c.start_money
+    );
+    for (i, x) in c.traits.iter().enumerate() {
+        let _ = write!(t, "{}{}", if i > 0 { "," } else { "" }, s(x));
+    }
+    t.push_str("]}");
+    t
+}
+
 fn food_price(w: &World) -> i64 {
     let food = w.config().food;
     (0..w.economy().len())

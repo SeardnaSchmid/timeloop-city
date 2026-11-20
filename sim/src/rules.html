@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timeloop City Rules</title>
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #ffffff; --ink: #1f2328; --muted: #6b6f76; --line: #e3e1da;
+  --accent: #2f7fd1; --good: #2b8a5e; --need: #d9822b; --town: #4a78b5; --recipe: #8e5ea2;
+  --var: #2f7fd1; --num: #b5652d; --op: #6b6f76;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171a; --panel: #1d2024; --ink: #e8e6e1; --muted: #9a9ea5; --line: #2c3035;
+    --accent: #5aa2ee; --good: #4cbf8a; --need: #f0a050; --town: #6f9bd8; --recipe: #b48ad0;
+    --var: #6fb0f0; --num: #e0a070; --op: #9a9ea5;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171a; --panel: #1d2024; --ink: #e8e6e1; --muted: #9a9ea5; --line: #2c3035;
+  --accent: #5aa2ee; --good: #4cbf8a; --need: #f0a050; --town: #6f9bd8; --recipe: #b48ad0;
+  --var: #6fb0f0; --num: #e0a070; --op: #9a9ea5;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, sans-serif; }
+main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+header { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+h1 { font-size: 20px; margin: 0; }
+h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+a { color: var(--accent); }
+.muted { color: var(--muted); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+.grid .card { margin: 0; }
+svg { width: 100%; height: auto; display: block; }
+svg text { fill: var(--ink); font: 12px system-ui, sans-serif; }
+svg .small { font-size: 11px; fill: var(--muted); }
+table { border-collapse: collapse; width: 100%; }
+td, th { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; font-size: 12px; color: var(--muted); }
+td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+code { font: 12px/1.5 ui-monospace, SFMono-Regular, monospace; word-break: break-word; }
+.f .v { color: var(--var); } .f .n { color: var(--num); } .f .o { color: var(--op); }
+.rule { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.rule:last-child { border-bottom: 0; }
+.rule b { display: inline-block; min-width: 80px; }
+.tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 8px; border: 1px solid var(--line); color: var(--muted); margin-left: 6px; }
+.lbl { color: var(--muted); font-size: 12px; display: inline-block; min-width: 54px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Timeloop City · Rules</h1>
+    <span class="muted" id="summary">loading…</span>
+    <span style="flex:1"></span>
+    <a href="/">← Live</a>
+  </header>
+
+  <div class="card">
+    <h2>Value chain: who makes what from what, and which need it covers</h2>
+    <svg id="chain"></svg>
+    <div class="muted" style="font-size:12px;margin-top:6px">
+      Boxes: goods. Arrows between goods: a maker turns the input into the output
+      (<span style="color:var(--town)">blue</span>: a town business at the start,
+      <span style="color:var(--recipe)">violet</span>: a recipe founders can open).
+      Right: the needs, with how much one unit takes away.
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card"><h2>Needs (pyramid)</h2><table id="needs"></table></div>
+    <div class="card"><h2>Makers</h2><table id="makers"></table></div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <h2>Decisions: every wake-up, the allowed action with the highest score wins</h2>
+    <div id="actions"></div>
+  </div>
+  <div class="grid">
+    <div class="card"><h2>Founding firms</h2><div id="founding"></div></div>
+    <div class="card"><h2>Building houses</h2><div id="building"></div></div>
+    <div class="card"><h2>Choosing a home</h2><div id="housing"></div></div>
+    <div class="card"><h2>Market and growth</h2><table id="market"></table></div>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function formula(src) {
+  if (src == null) return '<span class="muted">always</span>';
+  const parts = src.match(/[A-Za-z_][\w.]*|\d+|\S/g) || [];
+  let out = '', last = 0;
+  // Keep the original spacing: walk the source and colour each token.
+  for (const tok of parts) {
+    const at = src.indexOf(tok, last);
+    out += esc(src.slice(last, at));
+    const cls = /^\d/.test(tok) ? 'n' : /^[A-Za-z_]/.test(tok) ? (/^(max|min|abs)$/.test(tok) ? 'o' : 'v') : 'o';
+    out += `<span class="${cls}">${esc(tok)}</span>`;
+    last = at + tok.length;
+  }
+  return `<code class="f">${out}${esc(src.slice(last))}</code>`;
+}
+const row = (k, v) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`;
+const ruleLine = (label, src) => `<div><span class="lbl">${label}</span> ${formula(src)}</div>`;
+
+function chain(r) {
+  const g = r.goods, n = g.length;
+  // Depth of a good: 0 if made from nothing, else its input's depth + 1.
+  const inputOf = Array(n).fill(null);
+  for (const m of r.makers) if (m.input) inputOf[m.output] = m.input[0];
+  const depth = Array(n).fill(-1);
+  const d = i => {
+    if (depth[i] >= 0) return depth[i];
+    depth[i] = 0; // guards against cycles
+    return (depth[i] = inputOf[i] == null ? 0 : d(inputOf[i]) + 1);
+  };
+  for (let i = 0; i < n; i++) d(i);
+  const cols = Math.max(...depth) + 1;
+  const rowsAt = Array(cols).fill(0), slot = Array(n);
+  for (let i = 0; i < n; i++) slot[i] = rowsAt[depth[i]]++;
+  // Needs on the right.
+  const needs = [
+    { name: 'hunger', tier: 1, from: [[r.food, r.meal_relief]] },
+    { name: 'fatigue', tier: 1, from: [], note: 'sleep in a bed (house)' },
+    { name: 'safety', tier: 2, from: [], note: `savings for ${r.needs.safety.reserve_days} days of meals` },
+    { name: 'comfort', tier: 3, from: r.comfort },
+  ];
+  const W = 1100, colW = 210, boxW = 120, boxH = 34, rowH = 70, top = 20;
+  const maxRows = Math.max(...rowsAt, needs.length);
+  const H = top + maxRows * rowH + 10;
+  const gx = i => 20 + depth[i] * colW, gy = i => top + slot[i] * rowH;
+  const nx = W - 170, ny = k => top + k * rowH;
+  let s = `<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="context-stroke"/></marker></defs>`;
+  // Maker edges between goods (or from nothing).
+  const byOutput = {};
+  for (const m of r.makers) (byOutput[m.output] ||= []).push(m);
+  for (const [out, ms] of Object.entries(byOutput)) {
+    const o = +out;
+    ms.forEach((m, k) => {
+      const color = m.town ? 'var(--town)' : 'var(--recipe)';
+      const rate = (m.per_hour_milli / 1000).toFixed(2).replace(/\.?0+$/, '');
+      const label = `${m.name} · ${rate}/h${m.input && m.input[1] !== 1 ? ` · ${m.input[1]} in` : ''}`;
+      if (m.input) {
+        const i = m.input[0];
+        const x1 = gx(i) + boxW, y1 = gy(i) + boxH / 2 + (k - (ms.length - 1) / 2) * 6;
+        const x2 = gx(o), y2 = gy(o) + boxH / 2 + (k - (ms.length - 1) / 2) * 6;
+        const mx = (x1 + x2) / 2;
+        s += `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2 - 2},${y2}" fill="none" stroke="${color}" stroke-width="1.6" marker-end="url(#ar)"/>`;
+        s += `<text class="small" x="${mx}" y="${(y1 + y2) / 2 - 5 - k * 12}" text-anchor="middle" style="fill:${color}">${esc(label)}</text>`;
+      } else {
+        s += `<text class="small" x="${gx(o)}" y="${gy(o) + boxH + 13 + k * 12}" style="fill:${color}">↑ ${esc(label)}</text>`;
+      }
+    });
+  }
+  // Good → need edges.
+  needs.forEach((nd, k) => {
+    for (const [good, relief] of nd.from) {
+      const x1 = gx(good) + boxW, y1 = gy(good) + boxH / 2, x2 = nx, y2 = ny(k) + boxH / 2;
+      const mx = (x1 + x2) / 2;
+      s += `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2 - 2},${y2}" fill="none" stroke="var(--need)" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ar)"/>`;
+      s += `<text class="small" x="${x2 - 8}" y="${y2 - 6 - (nd.from.length > 1 ? nd.from.findIndex(f => f[0] === good) * 12 : 0)}" text-anchor="end" style="fill:var(--need)">${esc(g[good])} −${relief}</text>`;
+    }
+  });
+  for (let i = 0; i < n; i++) {
+    const made = !!byOutput[i];
+    s += `<rect x="${gx(i)}" y="${gy(i)}" width="${boxW}" height="${boxH}" rx="7" fill="var(--panel)" stroke="var(--good)" stroke-width="${made ? 1.6 : 1}" ${made ? '' : 'stroke-dasharray="3 3"'}/>`;
+    s += `<text x="${gx(i) + boxW / 2}" y="${gy(i) + boxH / 2 + 4}" text-anchor="middle">${esc(g[i])}${i === r.food ? ' 🍞' : ''}</text>`;
+  }
+  needs.forEach((nd, k) => {
+    s += `<rect x="${nx}" y="${ny(k)}" width="150" height="${boxH}" rx="17" fill="var(--panel)" stroke="var(--need)" stroke-width="1.6"/>`;
+    s += `<text x="${nx + 75}" y="${ny(k) + boxH / 2 + 4}" text-anchor="middle">${nd.name} <tspan class="small">tier ${nd.tier}</tspan></text>`;
+    if (nd.note) s += `<text class="small" x="${nx + 75}" y="${ny(k) + boxH + 13}" text-anchor="middle">${esc(nd.note)}</text>`;
+  });
+  const svg = $('chain');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = s;
+}
+
+function render(r) {
+  $('summary').textContent = `${r.agents} agents · ${r.goods.length} goods · ${r.makers.length} makers · ${r.actions.length} actions`;
+  chain(r);
+  const N = r.needs;
+  $('needs').innerHTML = `<tr><th>need</th><th>tier</th><th>rule</th></tr>
+    <tr><td>hunger</td><td>1</td><td>+${N.hunger.per_hour}/h; a meal −${N.hunger.meal_relief} (${N.hunger.meal_minutes} min); from ${N.hunger.critical} drops everything to eat</td></tr>
+    <tr><td>fatigue</td><td>1</td><td>+${N.fatigue.per_hour}/h; sleep −${N.fatigue.recovery_per_hour}/h, at most ${N.fatigue.max_sleep_minutes} min</td></tr>
+    <tr><td>safety</td><td>2</td><td>1000 without savings, 0 with ${N.safety.reserve_days} days × ${N.safety.meals_per_day} meals saved</td></tr>
+    <tr><td>comfort</td><td>3</td><td>+${N.comfort.per_hour}/h; from ${N.comfort.buy_at} buys ${r.comfort.map(([g, v]) => `${r.goods[g]} (−${v})`).join(', ') || 'from the town'}, paying ≤ ${N.comfort.spend_permille}‰ of spare savings × need/${N.comfort.buy_at}</td></tr>`;
+  $('makers').innerHTML = `<tr><th>maker</th><th>makes</th><th class="num">/worker·h</th><th class="num">slots</th><th class="num">price</th><th class="num">wage</th></tr>` +
+    r.makers.map(m => `<tr><td>${esc(m.name)}<span class="tag">${m.town ? 'town' : 'recipe'}</span></td>
+      <td>${m.input ? `${m.input[1]} ${esc(r.goods[m.input[0]])} → ` : ''}${esc(r.goods[m.output])}</td>
+      <td class="num">${(m.per_hour_milli / 1000).toFixed(2)}</td><td class="num">${m.slots}</td>
+      <td class="num">${m.price}</td><td class="num">${m.wage}</td></tr>`).join('');
+  $('actions').innerHTML = r.actions.map(a => `<div class="rule"><b>${esc(a.kind)}</b>
+    ${ruleLine('when', a.when)}${ruleLine('score', a.score)}</div>`).join('');
+  const F = r.founding;
+  $('founding').innerHTML = F ? `<div class="muted" style="margin-bottom:6px">capital ${F.capital} · profit tax ${F.profit_tax_percent}% · at most ${F.max_firms} firms</div>
+    ${ruleLine('when', F.when)}${ruleLine('score', F.score)}${ruleLine('close', F.close)}` : '<span class="muted">off: only the town runs businesses</span>';
+  const B = r.building;
+  $('building').innerHTML = B ? `<div class="muted" style="margin-bottom:6px">cost ${B.cost} · ${B.beds} beds · rent ${B.rent} · ${B.construction_days} days to build · at most ${B.max_houses} by agents</div>
+    ${ruleLine('when', B.when)}${ruleLine('score', B.score)}
+    <div class="muted" style="margin-top:6px;font-size:12px">If nobody builds and more are homeless than beds are free, the town builds.</div>` : '<span class="muted">off</span>';
+  const Hs = r.housing;
+  $('housing').innerHTML = `<div class="muted" style="margin-bottom:6px">once a day each agent scores every house with a free bed (and its own), and staying homeless</div>
+    ${ruleLine('when', Hs.when)}${ruleLine('score', Hs.score)}${ruleLine('homeless', Hs.homeless_score)}`;
+  const M = r.market, G = r.growth;
+  $('market').innerHTML = row('price change per day', `≤ ${M.price_change_percent}%`) + row('lowest price', M.price_min) +
+    row('wage step / minimum', `${M.wage_step} / ${M.wage_min}`) + row('firm cash reserve', `${M.reserve_days} days of payroll`) +
+    row('start money per agent', r.start_money) +
+    (G ? row('growth', `up to ${G.max_agents} people, ${G.arrivals_per_day}/day when work is left over`) : row('growth', 'off')) +
+    row('traits', r.traits.map(esc).join(', '));
+}
+
+fetch('/api/rules', { cache: 'no-store' }).then(r => r.json()).then(render)
+  .catch(e => { $('summary').textContent = 'could not load rules: ' + e; });
+</script>
+</body>
+</html>

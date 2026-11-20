@@ -27,6 +27,7 @@ use timeloop_core::{Minute, MINUTES_PER_DAY};
 use crate::live::Live;
 
 const PAGE: &str = include_str!("live.html");
+const RULES_PAGE: &str = include_str!("rules.html");
 /// Longest stretch the engine holds the lock, so requests stay quick.
 const SLICE: Duration = Duration::from_millis(10);
 
@@ -142,6 +143,12 @@ fn handle(stream: TcpStream, shared: &Mutex<Shared>) -> io::Result<()> {
 
     let (status, kind, body) = match (method, path) {
         ("GET", "/") => ("200 OK", "text/html; charset=utf-8", PAGE.to_string()),
+        ("GET", "/rules") => ("200 OK", "text/html; charset=utf-8", RULES_PAGE.to_string()),
+        ("GET", "/api/rules") => (
+            "200 OK",
+            JSON,
+            crate::live::rules_json(lock(shared).live.world()),
+        ),
         ("GET", "/api/layout") => ("200 OK", JSON, lock(shared).live.layout_json()),
         ("GET", "/api/state") => ("200 OK", JSON, state(&lock(shared))),
         ("GET", "/api/history") => {
