@@ -4,6 +4,7 @@
 //! traits), evaluates every action and takes the highest score among those
 //! allowed. Ties go to a seed-based roll, never to memory order.
 
+use crate::economy::GoodId;
 use crate::formula::Formula;
 use crate::world::ActionKind;
 
@@ -179,6 +180,8 @@ pub struct BuildingRule {
     pub construction_days: u64,
     /// Houses built by agents at most.
     pub max_houses: u32,
+    /// Goods a house is built from, bought from their makers by the builder.
+    pub materials: Vec<(GoodId, u32)>,
 }
 
 /// Once a day every agent without a firm scores founding one for each good
@@ -200,6 +203,9 @@ pub struct FoundingRule {
     pub profit_tax_percent: i64,
     /// Open founded firms at most.
     pub max_firms: u32,
+    /// Goods a workshop is built from, bought by the founder (or, for a town
+    /// branch, the business opening it).
+    pub materials: Vec<(GoodId, u32)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

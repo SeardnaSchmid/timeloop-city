@@ -124,6 +124,9 @@ struct FoundingSection {
     profit_tax_percent: i64,
     /// Open founded firms at most.
     max_firms: u32,
+    /// Goods a workshop is built from, e.g. `{ wood = 15, stone = 10 }`.
+    #[serde(default)]
+    materials: BTreeMap<String, u32>,
     /// Founding is an option when this is > 0.
     when: Option<String>,
     score: String,
@@ -222,6 +225,9 @@ struct BuildingSection {
     construction_days: u64,
     /// Houses built by agents at most.
     max_houses: u32,
+    /// Goods a house is built from, e.g. `{ wood = 30, stone = 20 }`.
+    #[serde(default)]
+    materials: BTreeMap<String, u32>,
     when: Option<String>,
     score: String,
 }
@@ -704,7 +710,26 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
         rent_min: hs.rent_min,
         homeless_recovery_percent: hs.homeless_recovery_percent,
     };
-    let behaviour = parse_behaviour(&f, &traits)?;
+    let mut behaviour = parse_behaviour(&f, &traits)?;
+    let materials = |m: &BTreeMap<String, u32>, field: &str| {
+        let mut out = Vec::new();
+        for (g, &n) in m {
+            let id = good_id(g, field)?;
+            check(
+                businesses.iter().chain(&recipes).any(|b| b.output == id),
+                format!("{field}: nobody can make {g}"),
+            )?;
+            check(n > 0, format!("{field}.{g} must be > 0"))?;
+            out.push((id, n));
+        }
+        Ok::<_, ContentError>(out)
+    };
+    if let (Some(rule), Some(sec)) = (&mut behaviour.building, &f.building) {
+        rule.materials = materials(&sec.materials, "building.materials")?;
+    }
+    if let (Some(rule), Some(sec)) = (&mut behaviour.founding, &f.founding) {
+        rule.materials = materials(&sec.materials, "founding.materials")?;
+    }
     check(
         0 < f.wander.min_minutes && f.wander.min_minutes <= f.wander.max_minutes,
         "wander must satisfy 0 < min_minutes <= max_minutes",
@@ -927,6 +952,7 @@ fn parse_behaviour(f: &WorldFile, traits: &[String]) -> Result<Behaviour, Conten
                     start_rent: b.rent,
                     construction_days: b.construction_days,
                     max_houses: b.max_houses,
+                    materials: Vec::new(),
                 })
             }
         },
@@ -949,6 +975,7 @@ fn parse_behaviour(f: &WorldFile, traits: &[String]) -> Result<Behaviour, Conten
                     capital: fs.capital,
                     profit_tax_percent: fs.profit_tax_percent,
                     max_firms: fs.max_firms,
+                    materials: Vec::new(),
                 })
             }
         },

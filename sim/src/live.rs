@@ -55,6 +55,13 @@ impl Live {
         self.epoch = epoch;
     }
 
+    /// Starts over from day 0 with a new world file, same seed.
+    pub fn reconfigure(&mut self, config: WorldConfig) {
+        let epoch = self.epoch + 1;
+        *self = Self::new(self.seed, config, self.end);
+        self.epoch = epoch;
+    }
+
     /// Runs up to `minutes` further, never past the end.
     pub fn advance(&mut self, minutes: Minute) {
         let target = (self.world.now() + minutes).min(self.end);
@@ -427,17 +434,26 @@ pub fn rules_json(w: &World) -> String {
         s(h.score.source()),
         s(h.homeless_score.source())
     );
+    let goods = &c.goods;
+    let mats = |m: &[(timeloop_core::GoodId, u32)]| {
+        let items: Vec<String> = m
+            .iter()
+            .map(|(g, n)| format!("{}:{n}", s(&goods[*g as usize])))
+            .collect();
+        format!("{{{}}}", items.join(","))
+    };
     match &b.founding {
         Some(r) => {
             let _ = write!(
                 t,
-                ",\"founding\":{{\"when\":{},\"score\":{},\"close\":{},\"capital\":{},\"profit_tax_percent\":{},\"max_firms\":{}}}",
+                ",\"founding\":{{\"when\":{},\"score\":{},\"close\":{},\"capital\":{},\"profit_tax_percent\":{},\"max_firms\":{},\"materials\":{}}}",
                 f(&r.when),
                 s(r.score.source()),
                 s(r.close_when.source()),
                 r.capital,
                 r.profit_tax_percent,
-                r.max_firms
+                r.max_firms,
+                mats(&r.materials)
             );
         }
         None => t.push_str(",\"founding\":null"),
@@ -446,14 +462,15 @@ pub fn rules_json(w: &World) -> String {
         Some(r) => {
             let _ = write!(
                 t,
-                ",\"building\":{{\"when\":{},\"score\":{},\"cost\":{},\"beds\":{},\"rent\":{},\"construction_days\":{},\"max_houses\":{}}}",
+                ",\"building\":{{\"when\":{},\"score\":{},\"cost\":{},\"beds\":{},\"rent\":{},\"construction_days\":{},\"max_houses\":{},\"materials\":{}}}",
                 f(&r.when),
                 s(r.score.source()),
                 r.cost,
                 r.beds,
                 r.start_rent,
                 r.construction_days,
-                r.max_houses
+                r.max_houses,
+                mats(&r.materials)
             );
         }
         None => t.push_str(",\"building\":null"),

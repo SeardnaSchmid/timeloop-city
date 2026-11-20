@@ -62,10 +62,10 @@ code { font: 12px/1.5 ui-monospace, SFMono-Regular, monospace; word-break: break
     <h2>Value chain: who makes what from what, and which need it covers</h2>
     <svg id="chain"></svg>
     <div class="muted" style="font-size:12px;margin-top:6px">
-      Boxes: goods. Arrows between goods: a maker turns the input into the output
-      (<span style="color:var(--town)">blue</span>: a town business at the start,
-      <span style="color:var(--recipe)">violet</span>: a recipe founders can open).
-      Right: the needs, with how much one unit takes away.
+      One band per raw good and everything made from it. Square boxes: buildings that make a good
+      (<span style="color:var(--town)">blue</span>: the town runs one from the start, <span style="color:var(--recipe)">violet</span>: anyone with the money can found one),
+      with output per worker hour, jobs, and what a new one costs (capital + materials at start prices; hover for the parts).
+      Round boxes: goods; under them where they go (a need they cover, or how much a house or a new building needs). Right: the needs.
     </div>
   </div>
 
@@ -107,71 +107,111 @@ const ruleLine = (label, src) => `<div><span class="lbl">${label}</span> ${formu
 
 function chain(r) {
   const g = r.goods, n = g.length;
-  // Depth of a good: 0 if made from nothing, else its input's depth + 1.
-  const inputOf = Array(n).fill(null);
-  for (const m of r.makers) if (m.input) inputOf[m.output] = m.input[0];
-  const depth = Array(n).fill(-1);
-  const d = i => {
-    if (depth[i] >= 0) return depth[i];
-    depth[i] = 0; // guards against cycles
-    return (depth[i] = inputOf[i] == null ? 0 : d(inputOf[i]) + 1);
-  };
-  for (let i = 0; i < n; i++) d(i);
-  const cols = Math.max(...depth) + 1;
-  const rowsAt = Array(cols).fill(0), slot = Array(n);
-  for (let i = 0; i < n; i++) slot[i] = rowsAt[depth[i]]++;
-  // Needs on the right.
-  const needs = [
-    { name: 'hunger', tier: 1, from: [[r.food, r.meal_relief]] },
-    { name: 'fatigue', tier: 1, from: [], note: 'sleep in a bed (house)' },
-    { name: 'safety', tier: 2, from: [], note: `savings for ${r.needs.safety.reserve_days} days of meals` },
-    { name: 'comfort', tier: 3, from: r.comfort },
-  ];
-  const W = 1100, colW = 210, boxW = 120, boxH = 34, rowH = 70, top = 20;
-  const maxRows = Math.max(...rowsAt, needs.length);
-  const H = top + maxRows * rowH + 10;
-  const gx = i => 20 + depth[i] * colW, gy = i => top + slot[i] * rowH;
-  const nx = W - 170, ny = k => top + k * rowH;
-  let s = `<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="context-stroke"/></marker></defs>`;
-  // Maker edges between goods (or from nothing).
-  const byOutput = {};
-  for (const m of r.makers) (byOutput[m.output] ||= []).push(m);
-  for (const [out, ms] of Object.entries(byOutput)) {
-    const o = +out;
-    ms.forEach((m, k) => {
-      const color = m.town ? 'var(--town)' : 'var(--recipe)';
-      const rate = (m.per_hour_milli / 1000).toFixed(2).replace(/\.?0+$/, '');
-      const label = `${m.name} · ${rate}/h${m.input && m.input[1] !== 1 ? ` · ${m.input[1]} in` : ''}`;
-      if (m.input) {
-        const i = m.input[0];
-        const x1 = gx(i) + boxW, y1 = gy(i) + boxH / 2 + (k - (ms.length - 1) / 2) * 6;
-        const x2 = gx(o), y2 = gy(o) + boxH / 2 + (k - (ms.length - 1) / 2) * 6;
-        const mx = (x1 + x2) / 2;
-        s += `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2 - 2},${y2}" fill="none" stroke="${color}" stroke-width="1.6" marker-end="url(#ar)"/>`;
-        s += `<text class="small" x="${mx}" y="${(y1 + y2) / 2 - 5 - k * 12}" text-anchor="middle" style="fill:${color}">${esc(label)}</text>`;
-      } else {
-        s += `<text class="small" x="${gx(o)}" y="${gy(o) + boxH + 13 + k * 12}" style="fill:${color}">↑ ${esc(label)}</text>`;
-      }
-    });
+  const inputOf = Array(n).fill(null), kids = Array.from({ length: n }, () => []);
+  for (const m of r.makers) if (m.input && inputOf[m.output] == null) inputOf[m.output] = m.input[0];
+  for (let i = 0; i < n; i++) if (inputOf[i] != null) kids[inputOf[i]].push(i);
+  const byOutput = Array.from({ length: n }, () => []);
+  for (const m of r.makers) byOutput[m.output].push(m);
+  // Where each good goes: needs it covers, and what houses and firms are built from.
+  const uses = Array.from({ length: n }, () => []);
+  uses[r.food].push({ text: `hunger −${r.meal_relief}`, cls: 'need' });
+  for (const [good, relief] of r.comfort) uses[good].push({ text: `comfort −${relief}`, cls: 'need' });
+  const mat = (m, what) => Object.entries(m || {}).forEach(([name, k]) => {
+    const i = g.indexOf(name);
+    if (i >= 0) uses[i].push({ text: `${k} per ${what}`, cls: 'mat' });
+  });
+  if (r.building) mat(r.building.materials, 'house');
+  if (r.founding) mat(r.founding.materials, 'building');
+  // What a new building of any kind costs: capital plus materials at start prices.
+  const startPrice = i => Math.min(...byOutput[i].map(m => m.price), Infinity);
+  const F = r.founding;
+  let buildCost = null;
+  if (F) {
+    const ms = Object.entries(F.materials || {});
+    const money = F.capital + ms.reduce((sum, [name, k]) => sum + k * startPrice(g.indexOf(name)), 0);
+    buildCost = { text: `${F.capital}` + ms.map(([name, k]) => ` + ${k} ${name}`).join(''), money };
   }
-  // Good → need edges.
-  needs.forEach((nd, k) => {
-    for (const [good, relief] of nd.from) {
-      const x1 = gx(good) + boxW, y1 = gy(good) + boxH / 2, x2 = nx, y2 = ny(k) + boxH / 2;
-      const mx = (x1 + x2) / 2;
-      s += `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2 - 2},${y2}" fill="none" stroke="var(--need)" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ar)"/>`;
-      s += `<text class="small" x="${x2 - 8}" y="${y2 - 6 - (nd.from.length > 1 ? nd.from.findIndex(f => f[0] === good) * 12 : 0)}" text-anchor="end" style="fill:var(--need)">${esc(g[good])} −${relief}</text>`;
+  // One lane per raw good: its whole tree, building then good, left to right.
+  // A good takes as many rows as it has makers, or as its branches need.
+  const depth = Array(n).fill(0), row = Array(n).fill(0), lanes = [];
+  const walk = (i, start, dpt) => {
+    depth[i] = dpt;
+    row[i] = start;
+    let r = start;
+    for (const k of kids[i]) r += walk(k, r, dpt + 1);
+    return Math.max(byOutput[i].length, r - start, 1);
+  };
+  let rows = 0;
+  for (let i = 0; i < n; i++) if (inputOf[i] == null) {
+    const first = rows;
+    rows += walk(i, rows, 0);
+    lanes.push({ first, last: rows - 1 });
+  }
+  const lineH = 13, goodW = 110, goodH = 30, mkW = 128, mkH = 38, colW = 150, top = 16, laneGap = 14;
+  const rowH = Array(rows).fill(mkH + 10 + lineH);
+  for (let i = 0; i < n; i++) rowH[row[i]] = Math.max(rowH[row[i]], goodH + 10 + uses[i].length * lineH);
+  const rowY = [];
+  let y = top;
+  for (let k = 0; k < rows; k++) {
+    if (k > 0 && lanes.some(l => l.first === k)) y += laneGap;
+    rowY.push(y);
+    y += rowH[k];
+  }
+  const cols = 2 * (Math.max(...depth) + 1);
+  const W = 30 + cols * colW + 200, H = y + 10;
+  const gx = i => 20 + (2 * depth[i] + 1) * colW, gy = i => rowY[row[i]] + (mkH - goodH) / 2;
+  const mx = i => 20 + 2 * depth[i] * colW - 8, my = (i, k) => rowY[row[i] + k];
+  let s = `<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="context-stroke"/></marker></defs>`;
+  lanes.forEach((l, k) => {
+    const y0 = rowY[l.first] - laneGap / 2, y1 = rowY[l.last] + rowH[l.last] - laneGap / 2 + 4;
+    s += `<rect x="6" y="${y0}" width="${W - 210}" height="${y1 - y0}" rx="10" fill="var(--line)" opacity="${k % 2 ? 0.12 : 0.28}"/>`;
+  });
+  const curve = (x1, y1, x2, y2, color) => {
+    const c = (x1 + x2) / 2;
+    return `<path d="M${x1},${y1} C${c},${y1} ${c},${y2} ${x2 - 2},${y2}" fill="none" stroke="${color}" stroke-width="1.5" marker-end="url(#ar)"/>`;
+  };
+  // Buildings: input good → building → output good.
+  for (let o = 0; o < n; o++) byOutput[o].forEach((m, k) => {
+    const color = m.town ? 'var(--town)' : 'var(--recipe)';
+    const x = mx(o), y = my(o, k), cy = y + mkH / 2;
+    if (m.input) {
+      const i = m.input[0];
+      s += curve(gx(i) + goodW, gy(i) + goodH / 2, x, cy, color);
+      if (m.input[1] !== 1) s += `<text class="small" x="${x - 6}" y="${cy - 5}" text-anchor="end" style="fill:${color}">${m.input[1]}×</text>`;
     }
+    s += curve(x + mkW, cy, gx(o), gy(o) + goodH / 2, color);
+    const rate = (m.per_hour_milli / 1000).toFixed(2).replace(/\.?0+$/, '');
+    s += `<rect x="${x}" y="${y}" width="${mkW}" height="${mkH}" rx="4" fill="var(--panel)" stroke="${color}" stroke-width="1.4"/>`;
+    s += `<text x="${x + mkW / 2}" y="${y + 15}" text-anchor="middle">${esc(m.name)}</text>`;
+    s += `<text class="small" x="${x + mkW / 2}" y="${y + 30}" text-anchor="middle">${rate}/h per worker · ${m.slots} jobs</text>`;
+    const cost = !buildCost ? '' : m.town ? `town · branch ≈ ${buildCost.money}` : `build ≈ ${buildCost.money}`;
+    if (cost) s += `<text class="small" x="${x}" y="${y + mkH + 12}" style="fill:${color}"><title>${esc(buildCost.text)}</title>${cost}</text>`;
   });
   for (let i = 0; i < n; i++) {
-    const made = !!byOutput[i];
-    s += `<rect x="${gx(i)}" y="${gy(i)}" width="${boxW}" height="${boxH}" rx="7" fill="var(--panel)" stroke="var(--good)" stroke-width="${made ? 1.6 : 1}" ${made ? '' : 'stroke-dasharray="3 3"'}/>`;
-    s += `<text x="${gx(i) + boxW / 2}" y="${gy(i) + boxH / 2 + 4}" text-anchor="middle">${esc(g[i])}${i === r.food ? ' 🍞' : ''}</text>`;
+    s += `<rect x="${gx(i)}" y="${gy(i)}" width="${goodW}" height="${goodH}" rx="15" fill="var(--panel)" stroke="var(--good)" stroke-width="1.6"/>`;
+    s += `<text x="${gx(i) + goodW / 2}" y="${gy(i) + goodH / 2 + 4}" text-anchor="middle">${esc(g[i])}${i === r.food ? ' 🍞' : ''}</text>`;
+    uses[i].forEach((u, k) => {
+      const color = u.cls === 'need' ? 'var(--need)' : 'var(--muted)';
+      s += `<text class="small" x="${gx(i) + 4}" y="${gy(i) + goodH + 13 + k * lineH}" style="fill:${color}">→ ${esc(u.text)}</text>`;
+    });
   }
+  const boxH = goodH;
+  // Needs on the right, with what covers them.
+  const names = list => list.map(([i]) => g[i]).join(', ');
+  const needs = [
+    { name: 'hunger', tier: 1, note: g[r.food] },
+    { name: 'fatigue', tier: 1, note: 'sleep in a bed (house)' },
+    { name: 'safety', tier: 2, note: `savings for ${r.needs.safety.reserve_days} days of meals` },
+    { name: 'comfort', tier: 3, note: names(r.comfort) },
+  ];
+  const nx = W - 180;
   needs.forEach((nd, k) => {
-    s += `<rect x="${nx}" y="${ny(k)}" width="150" height="${boxH}" rx="17" fill="var(--panel)" stroke="var(--need)" stroke-width="1.6"/>`;
-    s += `<text x="${nx + 75}" y="${ny(k) + boxH / 2 + 4}" text-anchor="middle">${nd.name} <tspan class="small">tier ${nd.tier}</tspan></text>`;
-    if (nd.note) s += `<text class="small" x="${nx + 75}" y="${ny(k) + boxH + 13}" text-anchor="middle">${esc(nd.note)}</text>`;
+    const ny = top + k * 78;
+    s += `<rect x="${nx}" y="${ny}" width="170" height="${boxH}" rx="17" fill="var(--panel)" stroke="var(--need)" stroke-width="1.6"/>`;
+    s += `<text x="${nx + 85}" y="${ny + boxH / 2 + 4}" text-anchor="middle">${nd.name} <tspan class="small">tier ${nd.tier}</tspan></text>`;
+    const words = nd.note.split(', ');
+    for (let j = 0; j * 3 < words.length; j++)
+      s += `<text class="small" x="${nx + 85}" y="${ny + boxH + 13 + j * lineH}" text-anchor="middle">${esc(words.slice(j * 3, j * 3 + 3).join(', '))}</text>`;
   });
   const svg = $('chain');
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
@@ -194,11 +234,12 @@ function render(r) {
       <td class="num">${m.price}</td><td class="num">${m.wage}</td></tr>`).join('');
   $('actions').innerHTML = r.actions.map(a => `<div class="rule"><b>${esc(a.kind)}</b>
     ${ruleLine('when', a.when)}${ruleLine('score', a.score)}</div>`).join('');
+  const mats = m => { const e = Object.entries(m || {}); return e.length ? ' · materials ' + e.map(([g, n]) => `${n} ${esc(g)}`).join(', ') : ''; };
   const F = r.founding;
-  $('founding').innerHTML = F ? `<div class="muted" style="margin-bottom:6px">capital ${F.capital} · profit tax ${F.profit_tax_percent}% · at most ${F.max_firms} firms</div>
+  $('founding').innerHTML = F ? `<div class="muted" style="margin-bottom:6px">capital ${F.capital} · profit tax ${F.profit_tax_percent}% · at most ${F.max_firms} firms${mats(F.materials)}</div>
     ${ruleLine('when', F.when)}${ruleLine('score', F.score)}${ruleLine('close', F.close)}` : '<span class="muted">off: only the town runs businesses</span>';
   const B = r.building;
-  $('building').innerHTML = B ? `<div class="muted" style="margin-bottom:6px">cost ${B.cost} · ${B.beds} beds · rent ${B.rent} · ${B.construction_days} days to build · at most ${B.max_houses} by agents</div>
+  $('building').innerHTML = B ? `<div class="muted" style="margin-bottom:6px">cost ${B.cost} · ${B.beds} beds · rent ${B.rent} · ${B.construction_days} days to build · at most ${B.max_houses} by agents${mats(B.materials)}</div>
     ${ruleLine('when', B.when)}${ruleLine('score', B.score)}
     <div class="muted" style="margin-top:6px;font-size:12px">If nobody builds and more are homeless than beds are free, the town builds.</div>` : '<span class="muted">off</span>';
   const Hs = r.housing;

@@ -146,6 +146,22 @@ at a given game minute is the same however you got there.
 cargo run --release -p timeloop-sim -- serve        # http://127.0.0.1:7878
 ```
 
+With `--world content/data/world.toml` the server reloads that file whenever
+a page is (re)loaded after it changed, and starts the town over with it.
+
+The newer pages (so far `/rules`: value chain, needs, decision rules) are a
+React + TypeScript app in `web/` (Vite; React Flow with ELK for the value
+chain). While working on them, run the dev server next to the engine; edits
+show at once:
+
+```bash
+npm --prefix web install
+npm --prefix web run dev                             # http://localhost:5173, /api goes to :7878
+```
+
+`npm --prefix web run build` writes `web/dist`; `serve --web web/dist` then
+serves it at `/rules` without Node.
+
 To share a run as a single file instead, write a viewer and open it in a browser (no server needed).
 It plays back the whole run: agents coloured by action, houses with tenants
 and rent, a land-price layer, a history chart to jump around in, and details

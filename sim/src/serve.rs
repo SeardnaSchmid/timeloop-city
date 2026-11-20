@@ -20,9 +20,10 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant, SystemTime};
 
-use timeloop_core::{Minute, MINUTES_PER_DAY};
+use timeloop_core::{Minute, WorldConfig, MINUTES_PER_DAY};
 
 use crate::live::Live;
 
@@ -31,8 +32,19 @@ const RULES_PAGE: &str = include_str!("rules.html");
 /// Longest stretch the engine holds the lock, so requests stay quick.
 const SLICE: Duration = Duration::from_millis(10);
 
+/// The world file the server watches: a page load (F5) after the file
+/// changed restarts the town with the new file.
+pub struct Source {
+    pub path: PathBuf,
+    pub load: Box<dyn Fn(&Path) -> Result<WorldConfig, String> + Send>,
+    pub modified: Option<SystemTime>,
+}
+
 struct Shared {
     live: Live,
+    source: Option<Source>,
+    /// Built web UI to serve (`web/dist`), if any.
+    web: Option<PathBuf>,
     playing: bool,
     /// Game minutes per real second; `None` is as fast as possible.
     speed: Option<u64>,
@@ -44,10 +56,12 @@ struct Shared {
     target: Option<Minute>,
 }
 
-pub fn serve(live: Live, port: u16) -> io::Result<()> {
+pub fn serve(live: Live, port: u16, source: Option<Source>, web: Option<PathBuf>) -> io::Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", port))?;
     let shared = Arc::new(Mutex::new(Shared {
         live,
+        source,
+        web,
         playing: false,
         speed: Some(60),
         carry: 0.0,
@@ -119,6 +133,24 @@ fn engine(shared: &Mutex<Shared>) {
     }
 }
 
+/// Restarts the town if the world file changed since it was last loaded.
+fn reload(s: &mut Shared) -> Result<(), String> {
+    let Some(src) = &mut s.source else {
+        return Ok(());
+    };
+    let modified = std::fs::metadata(&src.path).and_then(|m| m.modified()).ok();
+    if modified == src.modified {
+        return Ok(());
+    }
+    let config = (src.load)(&src.path).map_err(|e| format!("{}: {e}", src.path.display()))?;
+    src.modified = modified;
+    s.live.reconfigure(config);
+    s.playing = false;
+    s.target = None;
+    eprintln!("reloaded {}", src.path.display());
+    Ok(())
+}
+
 fn handle(stream: TcpStream, shared: &Mutex<Shared>) -> io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     let mut reader = BufReader::new(stream.try_clone()?);
@@ -141,15 +173,30 @@ fn handle(stream: TcpStream, shared: &Mutex<Shared>) -> io::Result<()> {
     };
     let number = |key: &str| param(key).and_then(|v| v.parse::<u64>().ok());
 
+    // A page load fetches /api/rules or /api/layout first: that is when a
+    // changed world file is picked up.
+    let fresh = |json: fn(&Shared) -> String| {
+        let mut s = lock(shared);
+        match reload(&mut s) {
+            Ok(()) => ("200 OK", JSON, json(&s)),
+            Err(e) => (
+                "500 Internal Server Error",
+                "text/plain; charset=utf-8",
+                format!("world file has an error, keeping the old one:\n\n{e}\n"),
+            ),
+        }
+    };
+    let web = lock(shared).web.clone();
+    if let (Some(dir), "GET") = (&web, method) {
+        if let Some(file) = web_file(dir, path) {
+            return respond(stream, "200 OK", file.1, &file.0);
+        }
+    }
     let (status, kind, body) = match (method, path) {
         ("GET", "/") => ("200 OK", "text/html; charset=utf-8", PAGE.to_string()),
         ("GET", "/rules") => ("200 OK", "text/html; charset=utf-8", RULES_PAGE.to_string()),
-        ("GET", "/api/rules") => (
-            "200 OK",
-            JSON,
-            crate::live::rules_json(lock(shared).live.world()),
-        ),
-        ("GET", "/api/layout") => ("200 OK", JSON, lock(shared).live.layout_json()),
+        ("GET", "/api/rules") => fresh(|s| crate::live::rules_json(s.live.world())),
+        ("GET", "/api/layout") => fresh(|s| s.live.layout_json()),
         ("GET", "/api/state") => ("200 OK", JSON, state(&lock(shared))),
         ("GET", "/api/history") => {
             let from = number("from").unwrap_or(0) as usize;
@@ -187,15 +234,38 @@ fn handle(stream: TcpStream, shared: &Mutex<Shared>) -> io::Result<()> {
         }
         _ => ("404 Not Found", "text/plain", "not found\n".to_string()),
     };
-    let mut out = stream;
+    respond(stream, status, kind, body.as_bytes())
+}
+
+fn respond(mut out: TcpStream, status: &str, kind: &str, body: &[u8]) -> io::Result<()> {
     write!(
         out,
         "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\n\
          Cache-Control: no-store\r\nConnection: close\r\n\r\n",
         body.len()
     )?;
-    out.write_all(body.as_bytes())?;
+    out.write_all(body)?;
     out.flush()
+}
+
+/// A file of the built web UI (`--web DIR`): its pages are the app's
+/// index.html, everything else is served from the directory as is.
+fn web_file(dir: &Path, path: &str) -> Option<(Vec<u8>, &'static str)> {
+    let rel = match path {
+        "/" | "/rules" => "index.html",
+        p if p.starts_with("/assets/") && !p.contains("..") => &p[1..],
+        _ => return None,
+    };
+    let kind = match rel.rsplit('.').next() {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") => "text/javascript",
+        Some("css") => "text/css",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("woff2") => "font/woff2",
+        _ => "application/octet-stream",
+    };
+    std::fs::read(dir.join(rel)).ok().map(|b| (b, kind))
 }
 
 const JSON: &str = "application/json";

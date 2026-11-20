@@ -1,18 +1,34 @@
 #:schema ../schema/world.schema.json
-# Bread town: field -> mill -> bakery. All values are integers; needs use a 0-1000 scale.
+# A small town: food, building materials, drink, wood, clay, textiles, dairy, glass. All values are integers; needs use a 0-1000 scale.
 
 [world]
 agents = 100
 start_money = 200
 
 [goods]
-names = ["grain", "flour", "bread", "beer", "wood", "furniture"]
+# Raw goods (grain, wood, stone, clay, wool, milk, sand) come from the land;
+# everything else is made from one input. Bread is food; the rest covers
+# comfort or is building material.
+names = [
+  "grain", "flour", "bread", "beer",
+  "wood", "planks", "furniture",
+  "stone", "clay", "bricks", "pottery",
+  "wool", "yarn", "cloth", "clothes",
+  "milk", "cheese",
+  "sand", "glassware",
+]
 food = "bread"
 
-# What a unit satisfies. Nobody makes beer or furniture at the start.
+# What a unit satisfies. Nobody makes these at the start.
 [goods.satisfies]
 beer = { comfort = 250 }
 furniture = { comfort = 600 }
+clothes = { comfort = 500 }
+cheese = { comfort = 200 }
+pottery = { comfort = 300 }
+glassware = { comfort = 250 }
+
+# --- Food chain (town): field -> mill -> bakery ---
 
 [[business]]
 name = "field"
@@ -57,8 +73,83 @@ stock = 150
 output_target = 100
 input_target = 200
 
+# --- Building materials (town): every house and every new firm needs them,
+# so the town runs the first producers; founders add more when they run short.
+
+[[business]]
+name = "woodcutter"
+x = 1
+y = 10
+output = "wood"
+output_milli_per_worker_hour = 1500
+slots = 6
+cash = 2000
+price = 15
+wage = 10
+stock = 100
+output_target = 60
+
+[[business]]
+name = "sawmill"
+x = 6
+y = 9
+output = "planks"
+input = { good = "wood", amount = 1 }
+output_milli_per_worker_hour = 2000
+slots = 4
+cash = 2000
+price = 25
+wage = 10
+stock = 60
+output_target = 60
+input_target = 60
+
+[[business]]
+name = "quarry"
+x = 22
+y = 3
+output = "stone"
+output_milli_per_worker_hour = 1000
+slots = 4
+cash = 2000
+price = 20
+wage = 10
+stock = 40
+output_target = 40
+
+[[business]]
+name = "clay pit"
+x = 17
+y = 16
+output = "clay"
+output_milli_per_worker_hour = 2000
+slots = 4
+cash = 2000
+price = 10
+wage = 10
+stock = 100
+output_target = 80
+
+[[business]]
+name = "brickworks"
+x = 16
+y = 10
+output = "bricks"
+input = { good = "clay", amount = 2 }
+output_milli_per_worker_hour = 1500
+slots = 6
+cash = 2000
+price = 30
+wage = 10
+stock = 80
+output_target = 80
+input_target = 120
+
 # Kinds of business nobody runs at the start. Founders open them once their
-# good is short (people wanted it and found none) and sells well.
+# good is short (people, or a business needing it as input, found none) and
+# sells well. Price ~ input cost + labour + margin.
+
+# Drink
 [[recipe]]
 name = "brewery"
 output = "beer"
@@ -70,8 +161,9 @@ wage = 10
 output_target = 50
 input_target = 100
 
+# Wood
 [[recipe]]
-name = "woodcutter"
+name = "forester"
 output = "wood"
 output_milli_per_worker_hour = 1500
 slots = 6
@@ -80,15 +172,152 @@ wage = 10
 output_target = 50
 
 [[recipe]]
+name = "joinery"
+output = "planks"
+input = { good = "wood", amount = 1 }
+output_milli_per_worker_hour = 2000
+slots = 4
+price = 25
+wage = 10
+output_target = 50
+input_target = 50
+
+[[recipe]]
 name = "carpenter"
 output = "furniture"
-input = { good = "wood", amount = 2 }
+input = { good = "planks", amount = 2 }
 output_milli_per_worker_hour = 500
 slots = 4
 price = 100
 wage = 10
 output_target = 20
 input_target = 40
+
+# Stone and clay
+[[recipe]]
+name = "stonecutter"
+output = "stone"
+output_milli_per_worker_hour = 1000
+slots = 4
+price = 20
+wage = 10
+output_target = 40
+
+[[recipe]]
+name = "claydigger"
+output = "clay"
+output_milli_per_worker_hour = 2000
+slots = 4
+price = 10
+wage = 10
+output_target = 80
+
+[[recipe]]
+name = "kiln"
+output = "bricks"
+input = { good = "clay", amount = 2 }
+output_milli_per_worker_hour = 1500
+slots = 6
+price = 30
+wage = 10
+output_target = 60
+input_target = 100
+
+[[recipe]]
+name = "potter"
+output = "pottery"
+input = { good = "clay", amount = 1 }
+output_milli_per_worker_hour = 1000
+slots = 3
+price = 30
+wage = 10
+output_target = 20
+input_target = 30
+
+# Textiles: sheep -> spinning -> weaving -> tailoring
+[[recipe]]
+name = "sheep farm"
+output = "wool"
+output_milli_per_worker_hour = 1000
+slots = 4
+price = 20
+wage = 10
+output_target = 40
+
+[[recipe]]
+name = "spinner"
+output = "yarn"
+input = { good = "wool", amount = 1 }
+output_milli_per_worker_hour = 2000
+slots = 4
+price = 30
+wage = 10
+output_target = 40
+input_target = 40
+
+[[recipe]]
+name = "weaver"
+output = "cloth"
+input = { good = "yarn", amount = 2 }
+output_milli_per_worker_hour = 1000
+slots = 4
+price = 75
+wage = 10
+output_target = 20
+input_target = 40
+
+[[recipe]]
+name = "tailor"
+output = "clothes"
+input = { good = "cloth", amount = 1 }
+output_milli_per_worker_hour = 500
+slots = 3
+price = 120
+wage = 10
+output_target = 15
+input_target = 15
+
+# Dairy
+[[recipe]]
+name = "dairy"
+output = "milk"
+output_milli_per_worker_hour = 2000
+slots = 4
+price = 10
+wage = 10
+output_target = 60
+
+[[recipe]]
+name = "cheesemaker"
+output = "cheese"
+input = { good = "milk", amount = 4 }
+output_milli_per_worker_hour = 1000
+slots = 3
+price = 55
+wage = 10
+output_target = 20
+input_target = 80
+
+# Glass
+[[recipe]]
+name = "sand pit"
+output = "sand"
+output_milli_per_worker_hour = 3000
+slots = 3
+price = 5
+wage = 10
+output_target = 60
+
+[[recipe]]
+name = "glassworks"
+output = "glassware"
+input = { good = "sand", amount = 3 }
+output_milli_per_worker_hour = 1000
+slots = 3
+price = 35
+wage = 10
+output_target = 20
+input_target = 60
 
 [market]
 price_change_percent = 5
@@ -205,8 +434,10 @@ max_level = 100
 
 # Houses. Someone with the cost in cash builds when full houses turn people away
 # and few beds are free; rent goes to the builder (after the profit tax).
+# cost is land and labour; the materials are bought on the market on top.
 [building]
-cost = 800
+cost = 400
+materials = { planks = 12, bricks = 16, stone = 6 }
 beds = 8
 rent = 5
 construction_days = 30
@@ -281,8 +512,10 @@ score = "300 + trait.work_life / 4"
 # ran short lately and sells well above what it costs to make.
 [founding]
 capital = 300
+# A workshop: bought on the market on top of the capital.
+materials = { planks = 4, bricks = 6 }
 profit_tax_percent = 75
-max_firms = 16
+max_firms = 30
 when = "owns_firm < 3 && money >= firm.capital + 100 && market.newest_days >= 365 && market.price * 100 >= market.cost * 150 && (market.firms > 0 || market.shortage > 0)"
 score = "(market.price - market.cost) * 1000 / max(market.cost, 1) + market.shortage + trait.greed / 2"
 # Broke for a month: give up. Town businesses follow the same rule.

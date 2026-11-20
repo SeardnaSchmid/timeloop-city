@@ -26,6 +26,7 @@ Usage: sim [OPTIONS]
   --days N       number of game days (default 1)
   --agents N     override the number of agents from the world file
   --world FILE   custom world.toml instead of the bundled one
+  --web DIR      serve: the built web UI (web/dist) at /rules
   --watch        reload the decision rules from --world when the file changes
   --stats FILE   write one CSV row of economy statistics per day
   --years N      number of game years of 365 days (instead of --days)
@@ -51,6 +52,8 @@ struct Args {
     days: u64,
     agents: Option<u32>,
     world: Option<PathBuf>,
+    /// Built web UI for `serve` (web/dist).
+    web: Option<PathBuf>,
     watch: bool,
     stats: Option<PathBuf>,
     html: Option<PathBuf>,
@@ -84,6 +87,7 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
         days: 1,
         agents: None,
         world: None,
+        web: None,
         watch: false,
         stats: None,
         html: None,
@@ -119,6 +123,7 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
             "--port" => a.port = parse(&value("--port")?, "--port")?,
             "--agents" => a.agents = Some(parse(&value("--agents")?, "--agents")?),
             "--world" => a.world = Some(value("--world")?.into()),
+            "--web" => a.web = Some(value("--web")?.into()),
             "--watch" => a.watch = true,
             "--stats" => a.stats = Some(value("--stats")?.into()),
             "--html" => a.html = Some(value("--html")?.into()),
@@ -181,7 +186,19 @@ fn main() -> ExitCode {
     if args.serve {
         let days = if args.days_given { args.days } else { 80 * 365 };
         let live = live::Live::new(args.seed, config, days * MINUTES_PER_DAY);
-        return match serve::serve(live, args.port) {
+        let agents = args.agents;
+        let source = args.world.clone().map(|path| serve::Source {
+            load: Box::new(move |p: &std::path::Path| {
+                let mut c = timeloop_content::load_world(p).map_err(|e| e.to_string())?;
+                if let Some(n) = agents {
+                    c.agents = n;
+                }
+                Ok(c)
+            }),
+            modified: std::fs::metadata(&path).and_then(|m| m.modified()).ok(),
+            path,
+        });
+        return match serve::serve(live, args.port, source, args.web.clone()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("cannot serve on port {}: {e}", args.port);

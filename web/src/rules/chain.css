@@ -1,0 +1,13 @@
+.chain { height: 78vh; min-height: 520px; border-radius: 8px; overflow: hidden; }
+.chain .react-flow { --xy-background-color: var(--panel); --xy-node-background-color: var(--panel); }
+.chain .react-flow__controls button { background: var(--panel); color: var(--ink); border-color: var(--line); fill: var(--ink); }
+.chain .react-flow__handle { opacity: 0; }
+.chain-node { background: var(--panel); color: var(--ink); border: 1.5px solid var(--line); padding: 6px 10px; font-size: 12px; }
+.chain-node .title { font-weight: 600; font-size: 13px; }
+.chain-node .line { color: var(--muted); font-size: 11px; line-height: 1.35; }
+.chain-node.good { border-color: var(--good); border-radius: 20px; text-align: center; display: flex; flex-direction: column; justify-content: center; }
+.chain-node.building { border-radius: 6px; }
+.chain-node.building.town { border-color: var(--town); }
+.chain-node.building.recipe { border-color: var(--recipe); border-style: dashed; }
+.chain-node.sink { border-color: var(--mat); border-radius: 6px; border-width: 2px; }
+.chain-node.need { border-color: var(--need); border-radius: 26px; text-align: center; }

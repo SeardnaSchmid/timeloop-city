@@ -2,3 +2,5 @@
 /map.html
 /core/.claude/
 /out
+/web/node_modules
+/web/dist

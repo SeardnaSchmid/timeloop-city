@@ -219,6 +219,16 @@
           "type": "integer",
           "format": "int64"
         },
+        "materials": {
+          "description": "Goods a house is built from, e.g. `{ wood = 30, stone = 20 }`.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "default": {}
+        },
         "max_houses": {
           "description": "Houses built by agents at most.",
           "type": "integer",
@@ -458,6 +468,16 @@
         "close": {
           "description": "The firm closes when this is > 0.",
           "type": "string"
+        },
+        "materials": {
+          "description": "Goods a workshop is built from, e.g. `{ wood = 15, stone = 10 }`.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "default": {}
         },
         "max_firms": {
           "description": "Open founded firms at most.",

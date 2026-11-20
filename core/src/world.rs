@@ -3244,6 +3244,7 @@ mod firm_tests {
             capital: 100,
             profit_tax_percent: tax,
             max_firms: 2,
+            materials: Vec::new(),
         });
         c
     }
@@ -3678,6 +3679,7 @@ mod assoc_tests {
             capital: 100,
             profit_tax_percent: 0,
             max_firms: 1,
+            materials: Vec::new(),
         });
         let mut w = World::new(1, c);
         let supply = w.money_supply();

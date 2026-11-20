@@ -1,0 +1,35 @@
+:root {
+  --grid: #ebe9e2; --land: 120, 110, 80;
+  --eat: #d9822b; --sleep: #6c63c9; --work: #2b8a5e; --overtime: #0f5c3d;
+  --wander: #9aa0a6; --travel: #2f7fd1; --idle: #c9ccd1; --house: #4a78b5; --sel: #e0245e;
+  --s1: #2b8a5e; --s2: #4a78b5; --s3: #d9822b; --s4: #c0392b; --s5: #8e6cc9; --s6: #3aa6a6; --s7: #b0843a;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --grid: #24282d; --land: 230, 210, 150;
+    --wander: #737a82; --idle: #4a4f56; --house: #6f9bd8; --sel: #ff5c8a;
+    --s2: #6f9bd8; --s4: #e8665a; --s5: #a98ce0;
+  }
+}
+.live { max-width: 1320px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; }
+@media (max-width: 900px) { .live { grid-template-columns: 1fr; } }
+.live header { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.live h1 { font-size: 18px; margin: 0 8px 0 0; }
+.live h3 { font-size: 13px; margin: 0 0 6px; }
+.clock { font-variant-numeric: tabular-nums; font-size: 18px; min-width: 210px; }
+.live button, .live input[type=number] { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
+.live button { cursor: pointer; }
+.live button.primary { background: var(--accent); border-color: var(--accent); color: #fff; min-width: 76px; }
+.live input[type=number] { width: 80px; }
+.speed { display: flex; align-items: center; gap: 8px; }
+.speed input { width: 180px; }
+.speed output { min-width: 110px; font-variant-numeric: tabular-nums; }
+.live .map { padding: 8px; }
+.live aside { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.live .wide { grid-column: 1 / -1; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+table.kv td { border: 0; padding: 2px 0; font-variant-numeric: tabular-nums; }
+table.kv td.num { padding-left: 8px; text-align: right; }
+tr.win td { font-weight: 600; }
+.formula { font: 11px ui-monospace, monospace; color: var(--muted); word-break: break-word; }
