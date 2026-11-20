@@ -53,6 +53,8 @@ impl PartialOrd for Scheduled {
 pub struct EventQueue {
     heap: BinaryHeap<Scheduled>,
     next_seq: u64,
+    /// Events popped so far; a work counter, not part of the state hash.
+    popped: u64,
 }
 
 impl EventQueue {
@@ -65,10 +67,16 @@ impl EventQueue {
     /// Pops the earliest event if it is due at or before `until`.
     pub fn pop_due(&mut self, until: Minute) -> Option<Scheduled> {
         if self.heap.peek()?.at <= until {
+            self.popped += 1;
             self.heap.pop()
         } else {
             None
         }
+    }
+
+    /// Events popped since the queue was created.
+    pub fn popped(&self) -> u64 {
+        self.popped
     }
 
     pub fn len(&self) -> usize {

@@ -2,6 +2,8 @@
 
 Deterministic city simulation in Rust. Architecture and roadmap (German):
 [Ages of Echo – Simulationsarchitektur](https://claude.ai/artifact/19Ga4YdpNxdwEtXZWZ2ysa).
+Design decisions for economy, careers and needs (German):
+[docs/economy-design.md](docs/economy-design.md), plan: [docs/implementation-plan.md](docs/implementation-plan.md).
 
 | Crate | Contents |
 | --- | --- |
@@ -32,7 +34,13 @@ cargo run --release -p timeloop-sim -- --years 3 --report
 `--snapshots DIR` does the same at years 1, 2, 3, 5, 10, 15, ... and writes
 `periods.csv` (one row per cut, Excel-ready), the map as text
 (`map_yNN.txt`) and every agent (`agents_yNN.csv`). 30 years of 100 agents
-take about 15 seconds:
+take about 15 seconds. Besides the table's columns, `periods.csv` has
+`purchasing_power` (a full day's net median wage over 3.2 meals plus the
+cheapest bed), the money moved during the period by kind (wages, pensions,
+rent, taxes, dues, welfare, levy, inheritance, founding capital, ...) and
+closed firms by reason (`closed_owner_dead`, `closed_no_input`,
+`closed_no_demand`, `closed_broke`). These counters stay out of the hash:
+
 
 ```bash
 cargo run --release -p timeloop-sim -- --years 30 --snapshots out
@@ -51,6 +59,20 @@ moved in for work, beds, houses built, comfort goods bought):
 
 ```bash
 cargo run --release -p timeloop-sim -- --days 3650 --stats stats.csv --quiet
+```
+
+Performance is measured in work, not only seconds: the engine counts events,
+decisions (wake-ups that score every action), options scored, home choices and
+formula evaluations. These counters are deterministic and outside the state
+hash. `--work FILE` writes them cumulatively, one CSV row per day; `--budget`
+prints them with the wall time to stderr and exits with code 3 when one
+exceeds its hard budget (`sim/src/budget.rs`: measured value plus headroom).
+CI runs this on every platform, shows the tables in the job summary
+(`--summary FILE`) and checks the counters match across platforms; the wall
+time is shown only, never gated.
+
+```bash
+cargo run --release -p timeloop-sim -- --days 3650 --quiet --budget --work work.csv
 ```
 
 Agents decide by utility: every action (`eat`, `sleep`, `work`, `overtime`,

@@ -7,6 +7,7 @@ pub mod assoc;
 pub mod behaviour;
 pub mod career;
 pub mod economy;
+pub mod flows;
 pub mod formula;
 pub mod hash;
 pub mod housing;
@@ -24,6 +25,7 @@ pub use behaviour::{
 };
 pub use career::CareerConfig;
 pub use economy::{BusinessConfig, BusinessId, Economy, GoodId, MarketConfig, RecipeInput};
+pub use flows::{CloseReason, Flows, CLOSE_REASONS};
 pub use formula::{Formula, FormulaError};
 pub use hash::{StateHash, StateHasher};
 pub use housing::{HouseConfig, Housing, HousingConfig};
@@ -32,5 +34,5 @@ pub use map::{Building, HouseId, Map, MapConfig, Pos};
 pub use needs::{LazyNeed, NEED_MAX};
 pub use world::{
     Action, ActionKind, Diagnosis, FirmChange, JobChange, LifeChange, LogEntry, Minute, Stats,
-    World, WorldConfig, BRANCH_BLOCKS, MINUTES_PER_DAY, MINUTES_PER_HOUR,
+    Work, World, WorldConfig, BRANCH_BLOCKS, MINUTES_PER_DAY, MINUTES_PER_HOUR,
 };
