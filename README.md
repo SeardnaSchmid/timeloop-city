@@ -3,7 +3,7 @@
 Deterministic city simulation in Rust. Architecture and roadmap (German):
 [Ages of Echo – Simulationsarchitektur](https://claude.ai/artifact/19Ga4YdpNxdwEtXZWZ2ysa).
 Design decisions for economy, careers and needs (German):
-[docs/economy-design.md](docs/economy-design.md).
+[docs/economy-design.md](docs/economy-design.md), plan: [docs/implementation-plan.md](docs/implementation-plan.md).
 
 | Crate | Contents |
 | --- | --- |
