@@ -480,6 +480,28 @@ pub const BRANCH_BLOCKS: [&str; 6] = [
     "parcel",
 ];
 
+/// Deterministic work done so far: what the engine spent its time on, in
+/// units that do not depend on the machine. Kept out of the state hash.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Work {
+    /// Events taken off the queue.
+    pub events: u64,
+    /// Wake-ups that scored every action.
+    pub decisions: u64,
+    /// Actions scored over all those decisions.
+    pub options: u64,
+    /// Most actions scored in one decision.
+    pub max_options: u64,
+    /// Daily home choices, one per agent.
+    pub home_choices: u64,
+    /// Houses scored over all home choices.
+    pub home_options: u64,
+    /// Most houses scored in one home choice.
+    pub max_home_options: u64,
+    /// Formula evaluations on this thread (see [`crate::formula::evals`]).
+    pub formula_evals: u64,
+}
+
 #[derive(Clone, Debug)]
 pub struct World {
     seed: u64,
@@ -548,6 +570,8 @@ pub struct World {
     level_table: Vec<u64>,
     /// Money flows and closure reasons; not hashed, they only measure.
     flows: Flows,
+    /// Work counters; not hashed, they only measure.
+    work: Work,
 }
 
 const NO_PARENT: (u32, u32) = (u32::MAX, u32::MAX);
@@ -650,6 +674,7 @@ impl World {
             xp: vec![0; n * config.goods.len()],
             level_table: config.career.as_ref().map_or(vec![0], |c| c.thresholds()),
             flows: Flows::default(),
+            work: Work::default(),
             config,
         }
     }
@@ -896,6 +921,15 @@ impl World {
             + self.housing.total_cash()
             + self.pension_fund
             + self.assoc_cash.iter().sum::<i64>()
+    }
+
+    /// Deterministic work counters since the world was created.
+    pub fn work(&self) -> Work {
+        Work {
+            events: self.queue.popped(),
+            formula_evals: crate::formula::evals(),
+            ..self.work
+        }
     }
 
     pub fn stats(&self) -> Stats {
@@ -1283,6 +1317,10 @@ impl World {
         for k in 0..n {
             let agent = (first + k) % n;
             let (options, homeless) = self.housing_options(agent);
+            let w = &mut self.work;
+            w.home_choices += 1;
+            w.home_options += options.len() as u64;
+            w.max_home_options = w.max_home_options.max(options.len() as u64);
             let current = self.home[agent as usize];
             // Ties: the current home, then the lowest house ID.
             let better = |a: (i64, bool), b: (i64, bool)| a.0 > b.0 || (a.0 == b.0 && a.1 && !b.1);
@@ -2625,7 +2663,11 @@ impl World {
 
     fn decide(&mut self, agent: u32, now: Minute) -> Action {
         let i = agent as usize;
-        let (v, _, kind) = self.candidates(agent, now);
+        let (v, scored, kind) = self.candidates(agent, now);
+        let w = &mut self.work;
+        w.decisions += 1;
+        w.options += scored.len() as u64;
+        w.max_options = w.max_options.max(scored.len() as u64);
         let fatigue = v[var::FATIGUE] as u32;
         let mut action = Action {
             kind,
@@ -2985,6 +3027,21 @@ pub(crate) mod tests {
         assert!(w.purchasing_power_centi() > 0);
         let mut other = w.clone();
         other.flows = Flows::default();
+        assert_eq!(other.state_hash(), w.state_hash());
+    }
+
+    #[test]
+    fn work_counters_measure_without_changing_the_hash() {
+        let mut w = World::new(1, config());
+        w.run_days(3);
+        let work = w.work();
+        assert!(work.decisions > 0 && work.events >= work.decisions);
+        assert_eq!(work.options, work.decisions * work.max_options);
+        // One a day start: minutes 0, 1440, 2880 and 4320.
+        assert_eq!(work.home_choices, 4 * w.agent_count() as u64);
+        assert!(work.formula_evals >= work.options);
+        let mut other = w.clone();
+        other.work = Work::default();
         assert_eq!(other.state_hash(), w.state_hash());
     }
 

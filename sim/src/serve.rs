@@ -32,11 +32,14 @@ const RULES_PAGE: &str = include_str!("rules.html");
 /// Longest stretch the engine holds the lock, so requests stay quick.
 const SLICE: Duration = Duration::from_millis(10);
 
+/// Reads a world file into a config.
+pub type Loader = Box<dyn Fn(&Path) -> Result<WorldConfig, String> + Send>;
+
 /// The world file the server watches: a page load (F5) after the file
 /// changed restarts the town with the new file.
 pub struct Source {
     pub path: PathBuf,
-    pub load: Box<dyn Fn(&Path) -> Result<WorldConfig, String> + Send>,
+    pub load: Loader,
     pub modified: Option<SystemTime>,
 }
 

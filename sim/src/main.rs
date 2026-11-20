@@ -5,9 +5,10 @@
 
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 use std::{path::PathBuf, process::ExitCode};
 
+mod budget;
 mod live;
 mod report;
 mod serve;
@@ -34,6 +35,12 @@ Usage: sim [OPTIONS]
   --html-days N  let the viewer cover only the last N days
   --html-step M  minutes between viewer frames (default: about 4000 frames,
                  at least 10 minutes; daily or longer steps show noon)
+  --work FILE    write cumulative work counters (events, decisions, options,
+                 formula evals) as one CSV row per day
+  --budget       at the end, print wall time and work counters to stderr and
+                 check the counters against the hard budgets; exit code 3 if
+                 one is exceeded
+  --summary FILE with --budget, also append both as Markdown tables to FILE
   --log          print every event before each day's hash
   --quiet        print only the final hash
   --report       print a yearly table of how the town grows and what holds it
@@ -56,6 +63,9 @@ struct Args {
     web: Option<PathBuf>,
     watch: bool,
     stats: Option<PathBuf>,
+    work: Option<PathBuf>,
+    budget: bool,
+    summary: Option<PathBuf>,
     html: Option<PathBuf>,
     html_days: Option<u64>,
     html_step: Option<Minute>,
@@ -90,6 +100,9 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
         web: None,
         watch: false,
         stats: None,
+        work: None,
+        budget: false,
+        summary: None,
         html: None,
         html_days: None,
         html_step: None,
@@ -126,6 +139,9 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
             "--web" => a.web = Some(value("--web")?.into()),
             "--watch" => a.watch = true,
             "--stats" => a.stats = Some(value("--stats")?.into()),
+            "--work" => a.work = Some(value("--work")?.into()),
+            "--budget" => a.budget = true,
+            "--summary" => a.summary = Some(value("--summary")?.into()),
             "--html" => a.html = Some(value("--html")?.into()),
             "--html-days" => a.html_days = Some(parse(&value("--html-days")?, "--html-days")?),
             "--html-step" => a.html_step = Some(parse(&value("--html-step")?, "--html-step")?),
@@ -143,6 +159,9 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
     }
     if a.log && a.quiet {
         return Err("--log and --quiet exclude each other".into());
+    }
+    if a.summary.is_some() && !a.budget {
+        return Err("--summary needs --budget".into());
     }
     if a.watch && a.world.is_none() {
         return Err("--watch needs --world".into());
@@ -219,7 +238,8 @@ fn main() -> ExitCode {
     }
 
     match run(&args, World::new(args.seed, config)) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::from(3),
         // A closed pipe (e.g. `| head`) is not an error.
         Err(e) if e.kind() == io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
         Err(e) => {
@@ -229,8 +249,19 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: &Args, mut world: World) -> io::Result<()> {
+/// Runs the days; `Ok(false)` if `--budget` found a budget exceeded.
+fn run(args: &Args, mut world: World) -> io::Result<bool> {
     let mut out = BufWriter::new(io::stdout().lock());
+    let mut work = match &args.work {
+        Some(path) => {
+            let mut f = BufWriter::new(File::create(path)?);
+            writeln!(f, "{}", budget::Totals::csv_header())?;
+            Some(f)
+        }
+        None => None,
+    };
+    let mut totals = budget::Totals::default();
+    let started = Instant::now();
     let mut stats = match &args.stats {
         Some(path) => {
             let mut f = BufWriter::new(File::create(path)?);
@@ -293,6 +324,14 @@ fn run(args: &Args, mut world: World) -> io::Result<()> {
                 _ => break,
             }
         }
+        totals.days = day;
+        totals.agent_days += world.agent_count() as u64;
+        if let Some(f) = &mut work {
+            totals.agents = world.agent_count();
+            totals.firms = world.stats().firms;
+            totals.work = world.work();
+            writeln!(f, "{}", totals.csv_row())?;
+        }
         if let Some(f) = &mut stats {
             let s = world.stats();
             let work_hours = (s.work_minutes_total - work_before) / 60;
@@ -327,11 +366,27 @@ fn run(args: &Args, mut world: World) -> io::Result<()> {
     if let Some(f) = &mut stats {
         f.flush()?;
     }
+    if let Some(f) = &mut work {
+        f.flush()?;
+    }
+    let mut within = true;
+    if args.budget {
+        totals.agents = world.agent_count();
+        totals.firms = world.stats().firms;
+        totals.work = world.work();
+        totals.seconds = started.elapsed().as_secs_f64();
+        within = totals.report(&mut io::stderr().lock())?;
+        if let Some(path) = &args.summary {
+            let mut f = File::options().create(true).append(true).open(path)?;
+            totals.markdown(&mut f)?;
+        }
+    }
     if let (Some(r), Some(path)) = (&recorder, &args.html) {
         r.write(&world, path)?;
         eprintln!("map viewer written to {}", path.display());
     }
-    out.flush()
+    out.flush()?;
+    Ok(within)
 }
 
 fn csv_header(world: &World) -> String {

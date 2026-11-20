@@ -13,10 +13,21 @@
 //! Comparisons and logic yield 0 or 1; any non-zero value is true.
 //! Arithmetic saturates; division and remainder by zero yield 0.
 
+use std::cell::Cell;
 use std::fmt;
 
 /// Deepest evaluation stack a formula may need.
 const MAX_STACK: usize = 32;
+
+thread_local! {
+    static EVALS: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Formula evaluations on this thread so far. A work counter for budgets and
+/// profiling: it never feeds back into the simulation or its state hash.
+pub fn evals() -> u64 {
+    EVALS.with(Cell::get)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Op {
@@ -119,6 +130,7 @@ impl Formula {
 
     /// Evaluates with `vars[i]` as the value of variable `i`.
     pub fn eval(&self, vars: &[i64]) -> i64 {
+        EVALS.with(|c| c.set(c.get() + 1));
         let mut stack = [0i64; MAX_STACK];
         let mut n = 0usize;
         for &op in &self.code {
