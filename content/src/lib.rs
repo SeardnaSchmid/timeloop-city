@@ -951,13 +951,13 @@ mod tests {
     #[test]
     fn default_world_parses() {
         let w = default_world();
-        assert_eq!(w.agents, 50);
+        assert_eq!(w.agents, 100);
         assert_eq!(w.goods[w.food as usize], "bread");
     }
 
     #[test]
     fn unknown_field_is_rejected() {
-        let text = DEFAULT_WORLD.replace("agents = 50", "agents = 50\nagnets = 3");
+        let text = DEFAULT_WORLD.replace("agents = 100", "agents = 100\nagnets = 3");
         assert!(matches!(parse_world(&text), Err(ContentError::Parse(_))));
     }
 

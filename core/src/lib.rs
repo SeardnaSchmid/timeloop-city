@@ -31,6 +31,6 @@ pub use life::{GrowthConfig, LifeConfig, Stage, DAYS_PER_YEAR};
 pub use map::{Building, HouseId, Map, MapConfig, Pos};
 pub use needs::{LazyNeed, NEED_MAX};
 pub use world::{
-    Action, ActionKind, FirmChange, JobChange, LifeChange, LogEntry, Minute, Stats, World,
-    WorldConfig, MINUTES_PER_DAY, MINUTES_PER_HOUR,
+    Action, ActionKind, Diagnosis, FirmChange, JobChange, LifeChange, LogEntry, Minute, Stats,
+    World, WorldConfig, BRANCH_BLOCKS, MINUTES_PER_DAY, MINUTES_PER_HOUR,
 };

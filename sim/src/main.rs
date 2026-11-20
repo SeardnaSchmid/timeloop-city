@@ -9,6 +9,7 @@ use std::time::SystemTime;
 use std::{path::PathBuf, process::ExitCode};
 
 mod live;
+mod report;
 mod serve;
 mod viewer;
 
@@ -34,6 +35,8 @@ Usage: sim [OPTIONS]
                  at least 10 minutes; daily or longer steps show noon)
   --log          print every event before each day's hash
   --quiet        print only the final hash
+  --report       print a yearly table of how the town grows and what holds it
+                 back, instead of the daily hashes
 
 serve runs the engine live (default 80 years, port 7878) and serves a page
 to steer and watch it at http://127.0.0.1:PORT.
@@ -53,6 +56,7 @@ struct Args {
     html_step: Option<Minute>,
     log: bool,
     quiet: bool,
+    report: bool,
     explain: Option<(u32, Minute)>,
     serve: bool,
     port: u16,
@@ -84,6 +88,7 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
         html_step: None,
         log: false,
         quiet: false,
+        report: false,
         explain: None,
         serve: false,
         port: 7878,
@@ -121,6 +126,7 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
             }
             "--log" => a.log = true,
             "--quiet" => a.quiet = true,
+            "--report" => a.report = true,
             "-h" | "--help" => return Err(String::new()),
             other => return Err(format!("unknown option: {other}")),
         }
@@ -216,6 +222,10 @@ fn run(args: &Args, mut world: World) -> io::Result<()> {
         let start = (args.days - days) * MINUTES_PER_DAY;
         viewer::Recorder::new(start, days * MINUTES_PER_DAY, args.html_step)
     });
+    let mut report = args.report.then(|| report::Report::new(args.days));
+    if let Some(r) = &report {
+        r.header(&mut out)?;
+    }
     let mut meals_before = 0;
     let mut work_before = 0;
     let mut starving_before = 0;
@@ -280,7 +290,9 @@ fn run(args: &Args, mut world: World) -> io::Result<()> {
             work_before = s.work_minutes_total;
             starving_before = s.starving_minutes_total;
         }
-        if !args.quiet {
+        if let Some(r) = &mut report {
+            r.day(&world, day, day == args.days, &mut out)?;
+        } else if !args.quiet {
             writeln!(out, "day {day:>6} {:016x}", world.state_hash())?;
         }
     }

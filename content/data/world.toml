@@ -2,7 +2,7 @@
 # Bread town: field -> mill -> bakery. All values are integers; needs use a 0-1000 scale.
 
 [world]
-agents = 50
+agents = 100
 start_money = 200
 
 [goods]
@@ -211,9 +211,9 @@ max_houses = 20
 when = "money >= building.cost + 200 && housing.wanted > 0 && housing.free_beds < 4"
 score = "money + housing.rent * 50"
 
-# Work nobody takes draws newcomers (working age, no money), up to 150 people.
+# Work nobody takes draws newcomers (working age, no money), up to 3x the start population.
 [growth]
-max_agents = 150
+max_agents = 300
 arrivals_per_day = 1
 
 [needs.hunger]

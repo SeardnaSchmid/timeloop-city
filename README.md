@@ -20,6 +20,15 @@ change the population:
 cargo run --release -p timeloop-sim -- --agents 1 --days 2 --log
 ```
 
+`--report` prints one line per year (per month under two years) on how the
+town is doing and why it does not grow: employment, wage, meal price, meals a
+day, starvation and whether it came from no money or empty shelves, rough
+sleepers, beds, town branches and houses, and what blocks new branches:
+
+```bash
+cargo run --release -p timeloop-sim -- --years 3 --report
+```
+
 Add `--stats FILE` to write one CSV row per day (money of agents, businesses and in total, prices, wages, cash,
 staff, stock, employment, hunger, meals, work hours, money Gini, share of
 time spent starving, rent and tenants per house, homeless, mean commute,
@@ -140,7 +149,7 @@ cargo run --release -p timeloop-sim -- --years 80 --html map.html --quiet
 With `--world FILE --watch` the rules are reloaded whenever the file changes,
 so behaviour can be tuned while a long run is going.
 
-The default world is a bread town: field -> mill -> bakery, 50 agents. Money is
+The default world is a bread town: field -> mill -> bakery, 100 agents. Money is
 a closed loop (never created or destroyed); prices and wages move in fixed daily
 steps. `sim/tests/bread_town.rs` checks that ten years stay fed and balanced;
 `sim/tests/traits.rs` checks that diligent and easygoing populations work

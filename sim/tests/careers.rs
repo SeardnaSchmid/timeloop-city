@@ -11,7 +11,10 @@ fn experience_pays_and_prices_settle() {
     let (mut swings, mut days, mut starving) = (0i64, 0i64, 0u64);
     let (mut money_low, mut money_high) = (0i64, 0i64);
     for seed in SEEDS {
-        let mut w = World::new(seed, timeloop_content::default_world());
+        // Calibrated for 50 people; the default world now starts with more.
+        let mut config = timeloop_content::default_world();
+        config.agents = 50;
+        let mut w = World::new(seed, config);
         w.run_days(365);
         let start = w.stats().starving_minutes_total;
         let mut last: Vec<i64> = w.stats().prices;

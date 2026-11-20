@@ -10,7 +10,9 @@ const DAYS: u64 = 10 * YEAR;
 fn rents_settle_and_people_move_closer_to_work() {
     for seed in [1, 2, 3] {
         // A town of fixed size and houses, so rents per house compare.
+        // Calibrated for 50 people; the default world now starts with more.
         let mut config = timeloop_content::default_world();
+        config.agents = 50;
         config.growth = None;
         config.behaviour.building = None;
         let mut world = World::new(seed, config);

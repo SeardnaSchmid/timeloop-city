@@ -10,7 +10,9 @@ const SEEDS: [u64; 6] = [1, 2, 3, 4, 5, 6];
 
 #[test]
 fn the_town_builds_grows_and_buys_new_goods() {
-    let start = timeloop_content::default_world();
+    // Calibrated for 50 people; the default world now starts with more.
+    let mut start = timeloop_content::default_world();
+    start.agents = 50;
     let people = start.agents;
     let first: Vec<_> = start.businesses.iter().map(|b| b.output).collect();
     let (mut starving, mut houses, mut grew, mut comforts, mut new_kinds) = (0, 0, 0, 0, 0);
