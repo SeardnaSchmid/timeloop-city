@@ -18,9 +18,9 @@
 
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
 use timeloop_core::{Minute, WorldConfig, MINUTES_PER_DAY};
@@ -56,7 +56,12 @@ struct Shared {
     target: Option<Minute>,
 }
 
-pub fn serve(live: Live, port: u16, source: Option<Source>, web: Option<PathBuf>) -> io::Result<()> {
+pub fn serve(
+    live: Live,
+    port: u16,
+    source: Option<Source>,
+    web: Option<PathBuf>,
+) -> io::Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", port))?;
     let shared = Arc::new(Mutex::new(Shared {
         live,
