@@ -18,9 +18,9 @@
 
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
 use timeloop_core::{Minute, WorldConfig, MINUTES_PER_DAY};
@@ -32,11 +32,14 @@ const RULES_PAGE: &str = include_str!("rules.html");
 /// Longest stretch the engine holds the lock, so requests stay quick.
 const SLICE: Duration = Duration::from_millis(10);
 
+/// Reads a world file into a config.
+pub type Loader = Box<dyn Fn(&Path) -> Result<WorldConfig, String> + Send>;
+
 /// The world file the server watches: a page load (F5) after the file
 /// changed restarts the town with the new file.
 pub struct Source {
     pub path: PathBuf,
-    pub load: Box<dyn Fn(&Path) -> Result<WorldConfig, String> + Send>,
+    pub load: Loader,
     pub modified: Option<SystemTime>,
 }
 
@@ -56,7 +59,12 @@ struct Shared {
     target: Option<Minute>,
 }
 
-pub fn serve(live: Live, port: u16, source: Option<Source>, web: Option<PathBuf>) -> io::Result<()> {
+pub fn serve(
+    live: Live,
+    port: u16,
+    source: Option<Source>,
+    web: Option<PathBuf>,
+) -> io::Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", port))?;
     let shared = Arc::new(Mutex::new(Shared {
         live,

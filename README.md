@@ -53,6 +53,20 @@ moved in for work, beds, houses built, comfort goods bought):
 cargo run --release -p timeloop-sim -- --days 3650 --stats stats.csv --quiet
 ```
 
+Performance is measured in work, not only seconds: the engine counts events,
+decisions (wake-ups that score every action), options scored, home choices and
+formula evaluations. These counters are deterministic and outside the state
+hash. `--work FILE` writes them cumulatively, one CSV row per day; `--budget`
+prints them with the wall time to stderr and exits with code 3 when one
+exceeds its hard budget (`sim/src/budget.rs`: measured value plus headroom).
+CI runs this on every platform, shows the tables in the job summary
+(`--summary FILE`) and checks the counters match across platforms; the wall
+time is shown only, never gated.
+
+```bash
+cargo run --release -p timeloop-sim -- --days 3650 --quiet --budget --work work.csv
+```
+
 Agents decide by utility: every action (`eat`, `sleep`, `work`, `overtime`,
 `wander`) has a `when` and a `score` formula in `[action.*]` of the world file,
 reading needs (hunger, fatigue, safety), money, the clock and character traits

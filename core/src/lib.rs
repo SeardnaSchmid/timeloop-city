@@ -32,5 +32,5 @@ pub use map::{Building, HouseId, Map, MapConfig, Pos};
 pub use needs::{LazyNeed, NEED_MAX};
 pub use world::{
     Action, ActionKind, Diagnosis, FirmChange, JobChange, LifeChange, LogEntry, Minute, Stats,
-    World, WorldConfig, BRANCH_BLOCKS, MINUTES_PER_DAY, MINUTES_PER_HOUR,
+    Work, World, WorldConfig, BRANCH_BLOCKS, MINUTES_PER_DAY, MINUTES_PER_HOUR,
 };

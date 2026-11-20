@@ -37,13 +37,28 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.93.0
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p timeloop-sim
-      - run: ./target/release/sim $SIM_ARGS > run-a.txt
+      # Run A also measures: wall time (shown only, runners vary ±20-30%) and
+      # the deterministic work counters, which must stay within budget.
+      - name: Run A, timing and work budget
+        run: |
+          echo "### Performance: ${{ matrix.os }} (\`$SIM_ARGS\`)" >> "$GITHUB_STEP_SUMMARY"
+          ./target/release/sim $SIM_ARGS --budget --summary "$GITHUB_STEP_SUMMARY" \
+            --work work.csv > run-a.txt 2> budget.txt || code=$?
+          cat budget.txt
+          exit ${code:-0}
       - run: ./target/release/sim $SIM_ARGS > run-b.txt
       - run: diff run-a.txt run-b.txt
       - uses: actions/upload-artifact@v4
         with:
           name: hashes-${{ matrix.os }}
           path: run-a.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-${{ matrix.os }}
+          path: |
+            work.csv
+            budget.txt
 
   # x86 and ARM, Linux, macOS and Windows must compute the same world.
   cross-platform:
@@ -59,4 +74,11 @@ jobs:
           for f in hashes/*/run-a.txt; do
             echo "comparing $f"
             diff "$ref" "$f"
+          done
+      - name: Work counters match too
+        run: |
+          ref=hashes/perf-ubuntu-latest/work.csv
+          for f in hashes/perf-*/work.csv; do
+            echo "comparing $f"
+            diff -q "$ref" "$f"
           done
