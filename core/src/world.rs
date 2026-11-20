@@ -49,8 +49,9 @@ pub struct WorldConfig {
     pub businesses: Vec<BusinessConfig>,
     /// Blueprints for goods no town business makes; founders can open them.
     pub recipes: Vec<BusinessConfig>,
-    /// Goods agents buy with their comfort budget, in buying order.
-    pub comfort_goods: Vec<GoodId>,
+    /// Goods that satisfy the comfort need, with the comfort each unit
+    /// takes away.
+    pub comfort_goods: Vec<(GoodId, u32)>,
     pub market: MarketConfig,
 
     pub map: MapConfig,
@@ -489,6 +490,7 @@ pub struct World {
     housing: Housing,
     hunger: Vec<LazyNeed>,
     fatigue: Vec<LazyNeed>,
+    comfort: Vec<LazyNeed>,
     money: Vec<i64>,
     employer: Vec<BusinessId>,
     home: Vec<HouseId>,
@@ -607,6 +609,7 @@ impl World {
             housing,
             hunger: vec![LazyNeed::new(0, 0); n],
             fatigue: vec![LazyNeed::new(0, 0); n],
+            comfort: vec![LazyNeed::new(0, 0); n],
             money: vec![config.start_money; n],
             employer: vec![NO_EMPLOYER; n],
             home: vec![NO_HOME; n],
@@ -772,6 +775,10 @@ impl World {
 
     pub fn hunger(&self, agent: u32) -> u32 {
         self.hunger[agent as usize].value(self.now, self.config.hunger_per_hour)
+    }
+
+    pub fn comfort(&self, agent: u32) -> u32 {
+        self.comfort[agent as usize].value(self.now, self.config.behaviour.comfort_per_hour)
     }
 
     pub fn fatigue(&self, agent: u32) -> u32 {
@@ -1144,6 +1151,7 @@ impl World {
         self.parent.push(NO_PARENT);
         self.hunger.push(LazyNeed::new(0, now));
         self.fatigue.push(LazyNeed::new(0, now));
+        self.comfort.push(LazyNeed::new(0, now));
         self.money.push(0);
         self.employer.push(NO_EMPLOYER);
         self.home.push(NO_HOME);
@@ -1376,7 +1384,7 @@ impl World {
                 comfort += spend;
             }
         } else {
-            comfort = self.buy_comforts();
+            self.buy_comforts();
         }
         let needy: Vec<usize> = (0..self.config.agents)
             .filter(|&a| self.safety(a) > 0)
@@ -2000,6 +2008,7 @@ impl World {
         self.lifespan[i] = life::lifespan(&l, seed, agent, gen, entry);
         self.hunger[i] = LazyNeed::new(0, now);
         self.fatigue[i] = LazyNeed::new(0, now);
+        self.comfort[i] = LazyNeed::new(0, now);
         self.action[i] = Action {
             started: now,
             ends: now,
@@ -2021,73 +2030,71 @@ impl World {
         });
     }
 
-    /// Everyone spends their comfort budget (a share of savings above the
-    /// safety reserve) on comfort goods, a unit at a time from the cheapest
-    /// seller, going round the goods. What finds nothing to buy goes to the
-    /// town's services instead (returned: it joins the welfare). Who buys
-    /// first rotates daily, as does the good they start with.
-    fn buy_comforts(&mut self) -> i64 {
+    /// Agents whose comfort need reached `comfort_buy_at` and who have
+    /// savings above the safety reserve (the level below) buy comfort goods,
+    /// the most comfort per price first, a unit at a time, until the need
+    /// drops below `comfort_buy_at`. The most they pay for a unit grows with
+    /// the need: `comfort_spend_permille` thousandths of the spare savings at
+    /// `comfort_buy_at`, twice that at twice the need; with five units' worth
+    /// spare, one is always affordable. A comfort good nobody has in stock
+    /// counts as unmet demand. Unspent money stays with the agent. Who buys
+    /// first rotates daily.
+    fn buy_comforts(&mut self) {
         let n = self.config.agents;
         let goods = self.config.comfort_goods.clone();
-        let mut to_town = 0;
         if n == 0 || goods.is_empty() {
-            return 0;
+            return;
         }
         let target = self.safety_target();
-        let permille = self.config.behaviour.comfort_spend_permille;
-        let day = self.day();
+        let b = &self.config.behaviour;
+        let (permille, buy_at, per_hour) = (
+            b.comfort_spend_permille,
+            b.comfort_buy_at.max(1),
+            b.comfort_per_hour,
+        );
+        let (now, day) = (self.now, self.day());
         for k in 0..n {
             let agent = ((day + k as u64) % n as u64) as usize;
-            let spare = (self.money[agent] - target).max(0);
-            let mut budget = spare * permille / 1000;
-            // A small share of modest savings would never buy anything: with
-            // five units' worth spare, one unit is affordable.
-            let cheapest = (goods.iter())
-                .filter_map(|&g| {
-                    self.economy
-                        .cheapest_seller(g)
-                        .map(|b| self.with_tax(g, self.economy.price(b)))
-                })
-                .min();
-            if let Some(c) = cheapest {
-                if spare >= 5 * c {
-                    budget = budget.max(c);
+            let mut noted = false;
+            loop {
+                let need = self.comfort[agent].value(now, per_hour);
+                let spare = (self.money[agent] - target).max(0);
+                if need < buy_at || spare == 0 {
+                    break;
                 }
-            }
-            let mut g = (day as usize + agent) % goods.len();
-            let mut misses = 0;
-            while misses < goods.len() {
-                let good = goods[g];
-                g = (g + 1) % goods.len();
-                let Some(seller) = self.economy.cheapest_seller(good) else {
-                    if budget > 0 {
-                        self.economy.note_unmet(good, 1);
+                let willing = spare * permille / 1000 * need as i64 / buy_at as i64;
+                let mut best: Option<(i64, GoodId, BusinessId, u32)> = None;
+                for &(good, relief) in &goods {
+                    let Some(seller) = self.economy.cheapest_seller(good) else {
+                        if !noted {
+                            self.economy.note_unmet(good, 1);
+                        }
+                        continue;
+                    };
+                    let cost = self.with_tax(good, self.economy.price(seller));
+                    if cost <= 0 || (cost > willing && spare < 5 * cost) {
+                        continue;
                     }
-                    misses += 1;
-                    continue;
-                };
-                let cost = self.with_tax(good, self.economy.price(seller));
-                if cost > budget || cost <= 0 {
-                    misses += 1;
-                    continue;
+                    let value = relief as i64 * 1000 / cost;
+                    if best.is_none_or(|(v, ..)| value > v) {
+                        best = Some((value, good, seller, relief));
+                    }
                 }
-                misses = 0;
+                noted = true;
+                let Some((_, good, seller, relief)) = best else {
+                    break;
+                };
                 let price = self.economy.sell_one(seller);
                 self.money[agent] -= price;
-                budget -= price;
                 for a in 0..self.assoc_cash.len() {
                     let tax = price * self.rule(a, RuleKind::SalesTaxPercent, good) / 100;
                     self.money[agent] -= tax;
-                    budget -= tax;
                     self.assoc_cash[a] += tax;
                 }
+                self.comfort[agent].set(now, need.saturating_sub(relief));
                 self.comforts_total += 1;
             }
-            let rest = budget.clamp(0, self.money[agent].max(0));
-            self.money[agent] -= rest;
-            to_town += rest;
         }
-        to_town
     }
 
     fn leave_job(
@@ -2604,6 +2611,7 @@ impl StateHash for World {
         h.write_u64(self.hunger.len() as u64);
         self.hunger.iter().for_each(|n| n.hash_into(h));
         self.fatigue.iter().for_each(|n| n.hash_into(h));
+        self.comfort.iter().for_each(|n| n.hash_into(h));
         h.write_i64_slice(&self.money);
         h.write_u32_slice(&self.employer);
         for a in &self.action {
@@ -2838,6 +2846,8 @@ pub(crate) mod tests {
                 .collect(),
             safety_reserve_days: 5,
             comfort_spend_permille: 0,
+            comfort_per_hour: 0,
+            comfort_buy_at: 0,
             meals_per_day: 3,
             housing: HousingRule {
                 when: Some(compile(HOUSING.0)),

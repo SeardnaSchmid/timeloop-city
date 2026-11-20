@@ -274,10 +274,11 @@ struct GoodsSection {
     names: Vec<String>,
     /// The good agents buy and eat.
     food: String,
-    /// Goods agents buy with their comfort budget (`needs.comfort`). Without
-    /// any, the comfort budget goes to the town.
+    /// Which needs a unit of each good satisfies and by how much, e.g.
+    /// `beer = { comfort = 300 }`. Needs so far: `comfort`. Without comfort
+    /// goods, the comfort budget goes to the town.
     #[serde(default)]
-    comfort: Vec<String>,
+    satisfies: BTreeMap<String, BTreeMap<String, u32>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -361,13 +362,20 @@ struct NeedsSection {
     comfort: Option<ComfortSection>,
 }
 
-/// Above safety: savings beyond the safety reserve are partly spent on
-/// comforts each day. The town provides them; the money returns as welfare.
+/// Above safety. The comfort need grows by `per_hour`; from `buy_at` on,
+/// agents with savings above the safety reserve buy goods that satisfy it
+/// (`goods.satisfies`), paying for one unit up to `spend_permille`
+/// thousandths of those spare savings at `buy_at`, more as the need grows.
+/// Without comfort goods, `spend_permille` of the spare savings go to the
+/// town every day and come back as welfare.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ComfortSection {
-    /// Thousandths of the savings above the reserve spent per day.
     spend_permille: i64,
+    #[serde(default)]
+    per_hour: u32,
+    #[serde(default)]
+    buy_at: u32,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -541,13 +549,23 @@ pub fn parse_world(text: &str) -> Result<WorldConfig, ContentError> {
         }
     }
     let mut comfort_goods = Vec::new();
-    for g in &f.goods.comfort {
-        let id = good_id(g, "goods.comfort")?;
+    for (g, needs) in &f.goods.satisfies {
+        let id = good_id(g, "goods.satisfies")?;
         check(
             businesses.iter().chain(&recipes).any(|b| b.output == id),
-            format!("goods.comfort: nobody can make {g}"),
+            format!("goods.satisfies: nobody can make {g}"),
         )?;
-        comfort_goods.push(id);
+        for (need, &relief) in needs {
+            check(
+                need == "comfort",
+                format!("goods.satisfies.{g}: unknown need {need} (known: comfort)"),
+            )?;
+            check(
+                (1..=1000).contains(&relief),
+                format!("goods.satisfies.{g}.{need} must be 1..=1000"),
+            )?;
+            comfort_goods.push((id, relief));
+        }
     }
     check(
         businesses.iter().any(|b| b.output == food),
@@ -869,6 +887,8 @@ fn parse_behaviour(f: &WorldFile, traits: &[String]) -> Result<Behaviour, Conten
         actions: rules,
         safety_reserve_days: f.needs.safety.reserve_days,
         meals_per_day: f.needs.safety.meals_per_day,
+        comfort_per_hour: f.needs.comfort.as_ref().map_or(0, |c| c.per_hour),
+        comfort_buy_at: f.needs.comfort.as_ref().map_or(0, |c| c.buy_at),
         comfort_spend_permille: match &f.needs.comfort {
             None => 0,
             Some(c) => {

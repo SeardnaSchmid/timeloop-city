@@ -8,8 +8,11 @@ start_money = 200
 [goods]
 names = ["grain", "flour", "bread", "beer", "wood", "furniture"]
 food = "bread"
-# Bought with the comfort budget; nobody makes them at the start.
-comfort = ["beer", "furniture"]
+
+# What a unit satisfies. Nobody makes beer or furniture at the start.
+[goods.satisfies]
+beer = { comfort = 250 }
+furniture = { comfort = 600 }
 
 [[business]]
 name = "field"
@@ -231,9 +234,12 @@ max_sleep_minutes = 600
 reserve_days = 5
 meals_per_day = 3
 
-# Comfort: 4% a day of savings beyond the safety reserve go to comforts the
-# town provides (paid back out as welfare).
+# Comfort, above safety: grows over the day; from buy_at on, agents with
+# savings beyond the safety reserve buy what satisfies it, paying for one
+# unit up to 4% of those savings at buy_at, more as the need grows.
 [needs.comfort]
+per_hour = 15
+buy_at = 300
 spend_permille = 40
 
 [meal]

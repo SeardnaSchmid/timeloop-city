@@ -115,42 +115,40 @@ d0005 23:41 a0 sleep    until d0006 07:20 h= 341 f= 612 m=7530
 d0006 00:00 -- day starts
 d0006 00:00 a1 moved to town
 d0006 00:00 a1 hired by b0
-d0006 00:00 a1 wander   until d0006 01:00 h=   0 f=   0 m=373
-d0006 01:00 a1 wander   until d0006 01:41 h=  40 f=  40 m=373
-d0006 01:41 a1 wander   until d0006 03:36 h=  67 f=  67 m=373
-d0006 03:36 a1 wander   until d0006 04:21 h= 144 f= 144 m=373
-d0006 04:21 a1 wander   until d0006 06:19 h= 174 f= 174 m=373
-d0006 06:19 a1 wander   until d0006 07:16 h= 252 f= 252 m=373
-d0006 07:16 a1 wander   until d0006 08:00 h= 290 f= 290 m=373
-d0006 07:20 a0 eat      until d0006 07:50 h= 647 f=   0 m=7216
-d0006 07:50 a0 eat      until d0006 08:20 h= 367 f=  20 m=7185
-d0006 08:00 a1 eat      until d0006 08:30 h= 320 f= 320 m=342
-d0006 08:20 a0 travel   until d0006 08:22 h=  87 f=  40 m=7185 to (2,5)
-d0006 08:22 a0 work     until d0006 10:22 h=  88 f=  41 m=7185
-d0006 08:30 a1 wander   until d0006 09:13 h=  40 f= 340 m=342
-d0006 09:13 a1 wander   until d0006 09:43 h=  68 f= 368 m=342
-d0006 09:43 a1 wander   until d0006 11:08 h=  88 f= 388 m=342
-d0006 10:22 a0 work     until d0006 12:22 h= 168 f= 121 m=7185
-d0006 11:08 a1 wander   until d0006 11:46 h= 145 f= 445 m=342
-d0006 11:46 a1 wander   until d0006 13:43 h= 170 f= 470 m=342
-d0006 12:22 a0 work     until d0006 14:22 h= 248 f= 201 m=7185
-d0006 13:43 a1 wander   until d0006 15:07 h= 248 f= 548 m=342
-d0006 14:22 a0 eat      until d0006 14:52 h= 328 f= 281 m=7154
-d0006 14:52 a0 work     until d0006 16:52 h=  48 f= 301 m=7154
-d0006 15:07 a1 eat      until d0006 15:37 h= 304 f= 604 m=311
-d0006 15:37 a1 wander   until d0006 16:51 h=  24 f= 624 m=311
-d0006 16:51 a1 wander   until d0006 18:23 h=  73 f= 674 m=311
-d0006 16:52 a0 work     until d0006 18:00 h= 128 f= 381 m=7154
-d0006 18:00 a0 wander   until d0006 19:55 h= 173 f= 426 m=7154
-d0006 18:23 a1 sleep    until d0007 04:23 h= 134 f= 735 m=311
-d0006 19:55 a0 wander   until d0006 21:25 h= 250 f= 503 m=7154
-d0006 21:25 a0 eat      until d0006 21:55 h= 310 f= 563 m=7123
-d0006 21:55 a0 wander   until d0006 22:39 h=  30 f= 583 m=7123
-d0006 22:39 a0 travel   until d0006 22:41 h=  59 f= 612 m=7123 to (2,6)
-d0006 22:41 a0 sleep    until d0007 06:22 h=  60 f= 614 m=7123
+d0006 00:00 a1 wander   until d0006 01:00 h=   0 f=   0 m=93
+d0006 01:00 a1 wander   until d0006 01:41 h=  40 f=  40 m=93
+d0006 01:41 a1 wander   until d0006 03:36 h=  67 f=  67 m=93
+d0006 03:36 a1 wander   until d0006 04:21 h= 144 f= 144 m=93
+d0006 04:21 a1 wander   until d0006 06:19 h= 174 f= 174 m=93
+d0006 06:19 a1 wander   until d0006 07:16 h= 252 f= 252 m=93
+d0006 07:16 a1 wander   until d0006 08:00 h= 290 f= 290 m=93
+d0006 07:20 a0 eat      until d0006 07:50 h= 647 f=   0 m=7496
+d0006 07:50 a0 eat      until d0006 08:20 h= 367 f=  20 m=7465
+d0006 08:00 a1 eat      until d0006 08:30 h= 320 f= 320 m=62
+d0006 08:20 a0 travel   until d0006 08:22 h=  87 f=  40 m=7465 to (2,5)
+d0006 08:22 a0 work     until d0006 10:22 h=  88 f=  41 m=7465
+d0006 08:30 a1 travel   until d0006 08:58 h=  40 f= 340 m=62 to (3,4)
+d0006 08:58 a1 work     until d0006 10:58 h=  58 f= 358 m=62
+d0006 10:22 a0 work     until d0006 12:22 h= 168 f= 121 m=7465
+d0006 10:58 a1 work     until d0006 12:58 h= 138 f= 438 m=78
+d0006 12:22 a0 work     until d0006 14:22 h= 248 f= 201 m=7465
+d0006 12:58 a1 wander   until d0006 14:50 h= 218 f= 518 m=94
+d0006 14:22 a0 eat      until d0006 14:52 h= 328 f= 281 m=7434
+d0006 14:50 a1 wander   until d0006 16:39 h= 293 f= 593 m=94
+d0006 14:52 a0 work     until d0006 16:52 h=  48 f= 301 m=7434
+d0006 16:39 a1 eat      until d0006 17:09 h= 366 f= 666 m=63
+d0006 16:52 a0 work     until d0006 18:00 h= 128 f= 381 m=7434
+d0006 17:09 a1 wander   until d0006 19:06 h=  86 f= 686 m=63
+d0006 18:00 a0 wander   until d0006 19:55 h= 173 f= 426 m=7434
+d0006 19:06 a1 sleep    until d0007 05:06 h= 164 f= 764 m=63
+d0006 19:55 a0 wander   until d0006 21:25 h= 250 f= 503 m=7434
+d0006 21:25 a0 eat      until d0006 21:55 h= 310 f= 563 m=7403
+d0006 21:55 a0 wander   until d0006 22:39 h=  30 f= 583 m=7403
+d0006 22:39 a0 travel   until d0006 22:41 h=  59 f= 612 m=7403 to (2,6)
+d0006 22:41 a0 sleep    until d0007 06:22 h=  60 f= 614 m=7403
 d0007 00:00 -- day starts
 d0007 00:00 a1 moved into h0
 d0007 00:00 association 0 sets min_price = 52
 d0007 00:00 a2 moved to town
 d0007 00:00 a2 hired by b1
-d0007 00:00 a2 wander   until d0007 01:48 h=   0 f=   0 m=309
+d0007 00:00 a2 wander   until d0007 01:48 h=   0 f=   0 m=162

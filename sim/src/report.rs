@@ -293,7 +293,7 @@ fn write_agents(w: &World, path: &Path) -> io::Result<()> {
     let e = w.economy();
     writeln!(
         f,
-        "agent,age,stage,job,level,owns,money,home,rent,hunger,fatigue,safety,action"
+        "agent,age,stage,job,level,owns,money,home,rent,hunger,fatigue,safety,comfort,action"
     )?;
     for a in 0..w.agent_count() {
         let job = w.employer(a).map(|b| e.config(b).output);
@@ -303,7 +303,7 @@ fn write_agents(w: &World, path: &Path) -> io::Result<()> {
         let home = w.home(a);
         writeln!(
             f,
-            "{a},{},{:?},{},{},{},{},{},{},{},{},{},{}",
+            "{a},{},{:?},{},{},{},{},{},{},{},{},{},{},{}",
             w.age_days(a) / YEAR,
             w.stage(a),
             job.map_or("-", |g| goods[g as usize].as_str()),
@@ -315,6 +315,7 @@ fn write_agents(w: &World, path: &Path) -> io::Result<()> {
             w.hunger(a),
             w.fatigue(a),
             w.safety(a),
+            w.comfort(a),
             w.action(a).kind.name(),
         )?;
     }

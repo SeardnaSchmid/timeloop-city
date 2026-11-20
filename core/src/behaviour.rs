@@ -145,11 +145,15 @@ pub struct Behaviour {
     /// Savings worth this many days of meals make an agent feel safe.
     pub safety_reserve_days: i64,
     pub meals_per_day: i64,
-    /// Comfort, the level above safety: every day agents spend this many
-    /// thousandths of their savings above the safety reserve on comforts.
-    /// The town provides them, so the money flows back as welfare. Keeps
-    /// wealth from piling up at firm owners until there are luxury goods.
+    /// Comfort, the level above safety. Without comfort goods, every day
+    /// agents spend this many thousandths of their savings above the safety
+    /// reserve on comforts the town provides (the money flows back as
+    /// welfare). With comfort goods it scales what they will pay for one.
     pub comfort_spend_permille: i64,
+    /// How fast the comfort need grows.
+    pub comfort_per_hour: u32,
+    /// Comfort need from which agents with savings to spare buy comfort goods.
+    pub comfort_buy_at: u32,
     /// Once a day every agent scores each house it could live in (one with
     /// a free bed, or its own) and staying homeless, and takes the best.
     pub housing: HousingRule,
