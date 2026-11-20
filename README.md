@@ -34,7 +34,13 @@ cargo run --release -p timeloop-sim -- --years 3 --report
 `--snapshots DIR` does the same at years 1, 2, 3, 5, 10, 15, ... and writes
 `periods.csv` (one row per cut, Excel-ready), the map as text
 (`map_yNN.txt`) and every agent (`agents_yNN.csv`). 30 years of 100 agents
-take about 15 seconds:
+take about 15 seconds. Besides the table's columns, `periods.csv` has
+`purchasing_power` (a full day's net median wage over 3.2 meals plus the
+cheapest bed), the money moved during the period by kind (wages, pensions,
+rent, taxes, dues, welfare, levy, inheritance, founding capital, ...) and
+closed firms by reason (`closed_owner_dead`, `closed_no_input`,
+`closed_no_demand`, `closed_broke`). These counters stay out of the hash:
+
 
 ```bash
 cargo run --release -p timeloop-sim -- --years 30 --snapshots out

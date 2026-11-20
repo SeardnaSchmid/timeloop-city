@@ -9,7 +9,7 @@ use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use timeloop_core::{Building, Diagnosis, Pos, World, BRANCH_BLOCKS, MINUTES_PER_DAY};
+use timeloop_core::{Building, Diagnosis, Flows, Pos, World, BRANCH_BLOCKS, MINUTES_PER_DAY};
 
 const YEAR: u64 = 365;
 
@@ -25,6 +25,7 @@ struct Snapshot {
     meals: u64,
     starving: u64,
     diagnosis: Diagnosis,
+    flows: Flows,
 }
 
 impl Snapshot {
@@ -34,6 +35,7 @@ impl Snapshot {
             meals: s.meals_total,
             starving: s.starving_minutes_total,
             diagnosis: w.diagnosis().clone(),
+            flows: *w.flows(),
         }
     }
 }
@@ -212,10 +214,18 @@ impl Report {
             ("comforts", s.comforts_total.to_string()),
             ("level_tenths", s.mean_level_tenths.to_string()),
             ("price_index", s.price_index.to_string()),
+            (
+                "purchasing_power",
+                format!("{:.2}", w.purchasing_power_centi() as f64 / 100.0),
+            ),
         ];
         let mut cols: Vec<(String, String)> = (cols.into_iter().chain(extra))
             .map(|(n, v)| (n.to_string(), v))
             .collect();
+        // Money moved during the period, by kind; closures by reason.
+        for (n, v) in now.flows.since(&self.last.flows) {
+            cols.push((n.to_string(), v.to_string()));
+        }
         for (g, name) in goods.iter().enumerate() {
             cols.push((
                 format!("{name}_makers/price"),

@@ -12,6 +12,7 @@ use crate::assoc::{avar, AssocKind, AssociationConfig, RuleKind, ASSOC_VARS, WEE
 use crate::behaviour::{var, Allowed, Behaviour, Candidate, Explanation, Population, MAX_VARS};
 use crate::career::{self, CareerConfig};
 use crate::economy::{BusinessConfig, BusinessId, Economy, GoodId, MarketConfig, NO_OWNER};
+use crate::flows::{CloseReason, Flows};
 use crate::hash::{StateHash, StateHasher};
 use crate::housing::{HouseConfig, Housing, HousingConfig, TOWN};
 use crate::life::{self, GrowthConfig, LifeConfig, Stage, DAYS_PER_YEAR};
@@ -545,6 +546,8 @@ pub struct World {
     xp: Vec<u64>,
     /// Experience needed per level; derived from the config.
     level_table: Vec<u64>,
+    /// Money flows and closure reasons; not hashed, they only measure.
+    flows: Flows,
 }
 
 const NO_PARENT: (u32, u32) = (u32::MAX, u32::MAX);
@@ -646,6 +649,7 @@ impl World {
                 .collect(),
             xp: vec![0; n * config.goods.len()],
             level_table: config.career.as_ref().map_or(vec![0], |c| c.thresholds()),
+            flows: Flows::default(),
             config,
         }
     }
@@ -687,6 +691,49 @@ impl World {
 
     pub fn diagnosis(&self) -> &Diagnosis {
         &self.diagnosis
+    }
+
+    /// Money flows and closures since the world began.
+    pub fn flows(&self) -> &Flows {
+        &self.flows
+    }
+
+    /// Purchasing power in hundredths: a full day's net wage at the median
+    /// wage (over workers) divided by 3.2 meals at the cheapest food price
+    /// (tax included) plus the cheapest bed. 0 without workers or prices.
+    pub fn purchasing_power_centi(&self) -> i64 {
+        let e = &self.economy;
+        let mut wages: Vec<(i64, u32)> = (0..e.len())
+            .filter(|&b| e.is_open(b) && e.workers(b) > 0)
+            .map(|b| (e.wage(b), e.workers(b)))
+            .collect();
+        wages.sort_unstable();
+        let total: u32 = wages.iter().map(|w| w.1).sum();
+        let mut seen = 0;
+        let Some(wage) = wages.iter().find_map(|&(w, n)| {
+            seen += n;
+            (2 * seen > total).then_some(w)
+        }) else {
+            return 0;
+        };
+        let pension = self.config.life.as_ref().map_or(0, |l| l.pension_percent) as i64;
+        let net = wage * self.config.work_hours() * (100 - pension) / 100;
+        let meal = (e.producers(self.config.food))
+            .filter(|&b| e.is_open(b))
+            .map(|b| e.price(b))
+            .min();
+        let bed = (0..self.housing.len())
+            .filter(|&h| !self.housing.under_construction(h))
+            .map(|h| self.housing.rent(h))
+            .min()
+            .unwrap_or(0);
+        match meal {
+            Some(m) => {
+                let cost = self.with_tax(self.config.food, m) * 32 / 10 + bed;
+                net * 100 / cost.max(1)
+            }
+            None => 0,
+        }
     }
 
     pub fn seed(&self) -> u64 {
@@ -1190,7 +1237,9 @@ impl World {
                 continue;
             }
             if self.money[i] >= self.housing.rent(h) {
-                self.money[i] -= self.housing.receive_rent(h);
+                let rent = self.housing.receive_rent(h);
+                self.money[i] -= rent;
+                self.flows.rent += rent;
             } else {
                 self.set_home(agent, NO_HOME, HomeChange::Evicted, at, log);
             }
@@ -1383,6 +1432,7 @@ impl World {
                 *m -= spend;
                 comfort += spend;
             }
+            self.flows.comfort_to_town += comfort;
         } else {
             self.buy_comforts();
         }
@@ -1407,6 +1457,8 @@ impl World {
             if let Some(owner) = self.economy.owner(b) {
                 let dividend = surplus * (100 - tax) / 100;
                 self.money[owner as usize] += dividend;
+                self.flows.dividends += dividend;
+                self.flows.tax_profit += surplus - dividend;
                 surplus -= dividend;
             }
             pot += surplus;
@@ -1419,6 +1471,8 @@ impl World {
                 Some(owner) => {
                     let income = cash * (100 - tax) / 100;
                     self.money[owner as usize] += income;
+                    self.flows.house_income += income;
+                    self.flows.tax_profit += cash - income;
                     pot += cash - income;
                 }
                 None => pot += cash,
@@ -1436,6 +1490,7 @@ impl World {
             if 2 * cash < reserve {
                 let top_up = (reserve - cash).min(pot);
                 self.economy.add_cash(b, top_up);
+                self.flows.town_backing += top_up;
                 pot -= top_up;
             }
         }
@@ -1462,16 +1517,19 @@ impl World {
                     let part = (*s as i128 * levy as i128 / total as i128) as i64;
                     *m -= part;
                     pot += part;
+                    self.flows.levy += part;
                 }
             }
         }
         for i in poor {
             let top_up = (floor - self.money[i]).min(pot);
             self.money[i] += top_up;
+            self.flows.welfare += top_up;
             pot -= top_up;
         }
         let share = pot / n;
         recipients.iter().for_each(|&i| self.money[i] += share);
+        self.flows.welfare += share * n;
         // The remainder waits until tomorrow.
         let rest = pot - share * n;
         if !self.housing.is_empty() {
@@ -1588,10 +1646,12 @@ impl World {
             ..blueprint.clone()
         };
         self.money[i] -= capital;
+        self.flows.capital += capital;
         let good = blueprint.output;
         for a in 0..self.assoc_cash.len() {
             let fee = self.rule(a, RuleKind::FoundingFee, good);
             self.money[i] -= fee;
+            self.flows.fees += fee;
             self.assoc_cash[a] += fee;
         }
         let b = self
@@ -1671,6 +1731,7 @@ impl World {
             ..blueprint.clone()
         };
         let paid = self.economy.pay(home, capital);
+        self.flows.branch_capital += paid;
         let b = self
             .economy
             .open_business(config, NO_OWNER, at / MINUTES_PER_DAY);
@@ -1751,6 +1812,7 @@ impl World {
             self.diagnosis.town_houses += 1;
         } else {
             self.money[agent as usize] -= rule.cost;
+            self.flows.building += rule.cost;
             // Land and permit: the cost joins the welfare with today's rent.
             self.housing.add_cash(0, rule.cost);
         }
@@ -1818,7 +1880,8 @@ impl World {
             .collect();
         for b in closing {
             let owner = self.economy.owner(b);
-            let cash = self.close_business(b, at, log);
+            let reason = self.close_reason(b);
+            let cash = self.close_business(b, reason, at, log);
             match owner {
                 Some(o) => self.money[o as usize] += cash,
                 // Town cash goes to the needy with today's rent payout.
@@ -1827,8 +1890,28 @@ impl World {
         }
     }
 
+    /// Why the close rule fired for `b`: no input on the shelf, else
+    /// unsold output on the shelf, else plain losses.
+    fn close_reason(&self, b: BusinessId) -> CloseReason {
+        let e = &self.economy;
+        let c = e.config(b);
+        if c.input.is_some_and(|i| e.stock(b, i.good) < i.amount) {
+            CloseReason::NoInput
+        } else if e.stock(b, c.output) > 0 {
+            CloseReason::NoDemand
+        } else {
+            CloseReason::Broke
+        }
+    }
+
     /// Lets everyone go, clears the parcel and returns the cash.
-    fn close_business(&mut self, b: BusinessId, at: Minute, log: &mut impl FnMut(LogEntry)) -> i64 {
+    fn close_business(
+        &mut self,
+        b: BusinessId,
+        reason: CloseReason,
+        at: Minute,
+        log: &mut impl FnMut(LogEntry),
+    ) -> i64 {
         for a in 0..self.config.agents {
             if self.employer[a as usize] == b {
                 self.leave_job(a, b, JobChange::Closed, at, log);
@@ -1841,6 +1924,8 @@ impl World {
             self.owns[o as usize] = NO_EMPLOYER;
         }
         self.firms_closed += 1;
+        self.flows.closed[reason.index()] += 1;
+        self.flows.closing_cash += cash;
         log(LogEntry::Firm {
             at,
             agent: owner.unwrap_or(u32::MAX),
@@ -1876,6 +1961,7 @@ impl World {
                 self.money[i] += share;
             }
             self.pension_fund -= share * receivers.len() as i64;
+            self.flows.pensions += share * receivers.len() as i64;
         }
     }
 
@@ -1899,10 +1985,13 @@ impl World {
             .map_or(0, |l| l.inheritance_tax_percent);
         let tax = money.max(0) * tax_percent as i64 / 100;
         self.housing.add_cash(0, tax);
+        self.flows.tax_inheritance += tax;
         money -= tax;
         if heirs.is_empty() {
             self.housing.add_cash(0, money);
+            self.flows.escheat += money;
         } else {
+            self.flows.inheritance += money;
             let share = money / heirs.len() as i64;
             for &h in &heirs {
                 self.money[h as usize] += share;
@@ -1937,7 +2026,7 @@ impl World {
                     }
                 }
                 None => {
-                    let cash = self.close_business(b, at, log);
+                    let cash = self.close_business(b, CloseReason::OwnerDead, at, log);
                     self.housing.add_cash(0, cash);
                 }
             }
@@ -2090,6 +2179,7 @@ impl World {
                     let tax = price * self.rule(a, RuleKind::SalesTaxPercent, good) / 100;
                     self.money[agent] -= tax;
                     self.assoc_cash[a] += tax;
+                    self.flows.tax_sales += tax;
                 }
                 self.comfort[agent].set(now, need.saturating_sub(relief));
                 self.comforts_total += 1;
@@ -2145,6 +2235,7 @@ impl World {
                 let tax = price * self.rule(a, RuleKind::SalesTaxPercent, food) / 100;
                 self.money[i] -= tax;
                 self.assoc_cash[a] += tax;
+                self.flows.tax_sales += tax;
             }
             self.meals_total += 1;
         }
@@ -2218,6 +2309,8 @@ impl World {
                     .map_or(0, |l| paid * l.pension_percent as i64 / 100);
                 self.pension_fund += pension;
                 self.money[i] += paid - pension;
+                self.flows.wages += paid;
+                self.flows.pension_in += pension;
                 if paid < owed && self.economy.workers(b) > CORE_CREW && self.owns[i] != b {
                     self.leave_job(agent, b, JobChange::QuitUnpaid, now, log);
                 }
@@ -2302,7 +2395,9 @@ impl World {
             let good = self.economy.config(b).output;
             for a in 0..n {
                 let due = revenue * self.rule(a, RuleKind::DuesPercent, good) / 100;
-                self.assoc_cash[a] += self.economy.pay(b, due);
+                let paid = self.economy.pay(b, due);
+                self.assoc_cash[a] += paid;
+                self.flows.dues += paid;
             }
         }
         for a in 0..n {
@@ -2878,6 +2973,19 @@ pub(crate) mod tests {
     #[test]
     fn same_seed_same_history() {
         assert_eq!(day_hashes(1, 365), day_hashes(1, 365));
+    }
+
+    #[test]
+    fn flows_measure_without_changing_the_hash() {
+        let mut w = World::new(1, config());
+        w.run_days(30);
+        let f = *w.flows();
+        assert!(f.wages > 0 && f.pension_in <= f.wages);
+        assert!(f.pensions <= f.pension_in);
+        assert!(w.purchasing_power_centi() > 0);
+        let mut other = w.clone();
+        other.flows = Flows::default();
+        assert_eq!(other.state_hash(), w.state_hash());
     }
 
     #[test]
